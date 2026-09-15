@@ -1,0 +1,6 @@
+{
+  "name": "SchoolPick",
+  "description": "Hệ thống đón học sinh thông minh – Giảm ùn tắc, chuẩn bị học sinh an toàn và đồng bộ thời gian thực cho trường học.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
