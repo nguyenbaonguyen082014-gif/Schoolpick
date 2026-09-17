@@ -103,17 +103,32 @@ export const ParentDashboard: React.FC = () => {
       {/* SECTION 2: HEADER CHÀO HỎI */}
       <div className="bg-white rounded-3xl p-5 sm:p-7 shadow-xs border border-slate-200">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-black uppercase mb-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>Cổng đón học sinh đang mở</span>
+          <div className="flex items-start space-x-3.5">
+            {currentUser?.avatarUrl && (
+              <img
+                src={currentUser.avatarUrl}
+                alt={currentUser.name}
+                referrerPolicy="no-referrer"
+                className="w-12 h-12 rounded-2xl object-cover border-2 border-blue-100 shadow-xs shrink-0 mt-1"
+              />
+            )}
+            <div>
+              <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-black uppercase mb-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Cổng đón học sinh đang mở</span>
+                {currentUser?.isGoogleAuth && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                    Google
+                  </span>
+                )}
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+                Xin chào, {currentUser?.name || 'Nguyễn Văn An'} 👋
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-500 mt-0.5 font-medium">
+                Trường THCS Ban Mai • Hệ thống SchoolPick hỗ trợ đón con thông minh, giảm ùn tắc.
+              </p>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-              Xin chào, {currentUser?.name || 'Nguyễn Văn An'} 👋
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-500 mt-0.5 font-medium">
-              Trường THCS Ban Mai • Hệ thống SchoolPick hỗ trợ đón con thông minh, giảm ùn tắc.
-            </p>
           </div>
 
           <div className="flex items-center space-x-2">

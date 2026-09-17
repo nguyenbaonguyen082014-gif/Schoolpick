@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { SchoolPickProvider, useSchoolPick } from './context/SchoolPickContext';
 import { Header } from './components/common/Header';
 import { LoginPage } from './components/auth/LoginPage';
+import { LandingPage } from './components/home/LandingPage';
 import { ParentDashboard } from './components/parent/ParentDashboard';
 import { TeacherDashboard } from './components/teacher/TeacherDashboard';
 import { AdminDashboard } from './components/admin/AdminDashboard';
@@ -15,7 +16,7 @@ import { UserRole } from './types';
 import { Car } from 'lucide-react';
 
 const AppContent: React.FC = () => {
-  const { currentUser, splitViewMode } = useSchoolPick();
+  const { currentUser, splitViewMode, unauthScreen } = useSchoolPick();
   const [teacherTab, setTeacherTab] = useState<'overview' | 'queue' | 'students' | 'history'>('overview');
   const [mapOpen, setMapOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -45,7 +46,11 @@ const AppContent: React.FC = () => {
         {/* Content Area */}
         <main className="flex-1 min-w-0">
           {!currentUser ? (
-            <LoginPage />
+            unauthScreen === 'home' ? (
+              <LandingPage />
+            ) : (
+              <LoginPage />
+            )
           ) : splitViewMode ? (
             <SplitScreenDemo />
           ) : currentUser.role === UserRole.PARENT ? (

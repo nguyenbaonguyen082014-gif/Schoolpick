@@ -55,10 +55,19 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  password?: string;
   phone?: string;
+  avatarUrl?: string;
+  isGoogleAuth?: boolean;
   assignedClassId?: string; // For teacher e.g. 7A1
   assignedClassName?: string;
   childrenIds?: string[]; // For parent
+}
+
+export interface LoginResult {
+  success: boolean;
+  reason?: 'NOT_FOUND' | 'WRONG_PASSWORD' | 'EMPTY_FIELDS';
+  message?: string;
 }
 
 export interface PickupRequest {

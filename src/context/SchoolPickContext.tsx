@@ -10,6 +10,7 @@ import {
   TransportationType,
   NotificationItem,
   ToastItem,
+  LoginResult,
 } from '../types';
 import {
   INITIAL_USERS,
@@ -55,8 +56,33 @@ interface SchoolPickContextType {
   closeConfirmation: () => void;
   
   // Actions
-  login: (email: string, role?: UserRole) => boolean;
-  logout: () => void;
+  authMode: 'login' | 'signup';
+  setAuthMode: (mode: 'login' | 'signup') => void;
+  unauthScreen: 'home' | 'auth';
+  setUnauthScreen: (screen: 'home' | 'auth') => void;
+  openAuth: (mode: 'login' | 'signup') => void;
+  goToHome: () => void;
+  googleStrictOnly: boolean;
+  setGoogleStrictOnly: (val: boolean) => void;
+  updateUserName: (newName: string) => void;
+  checkUserExists: (email: string) => User | null;
+  login: (email: string, role?: UserRole, password?: string) => LoginResult;
+  loginWithGoogle: (googleProfile: {
+    name: string;
+    email: string;
+    avatarUrl?: string;
+    role?: UserRole;
+  }) => boolean;
+  registerUser: (params: {
+    name: string;
+    email: string;
+    role: UserRole;
+    phone?: string;
+    studentName?: string;
+    className?: string;
+    password?: string;
+  }) => boolean;
+  logout: (force?: boolean) => void;
   switchRole: (role: UserRole) => void;
   createPickupRequest: (params: {
     studentId: string;
@@ -106,10 +132,22 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
         return null;
       }
       const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: User = JSON.parse(saved);
+        if (
+          parsed &&
+          parsed.email &&
+          !parsed.email.toLowerCase().endsWith('.demo') &&
+          parsed.id !== 'parent-1' &&
+          parsed.id !== 'teacher-1' &&
+          parsed.id !== 'admin-1'
+        ) {
+          return parsed;
+        }
+      }
     } catch {}
-    // Default to Parent for demo onboarding
-    return INITIAL_USERS[0];
+    // Không dùng tài khoản ảo mặc định - chờ người dùng đăng nhập hoặc đăng ký
+    return null;
   });
 
   const [requests, setRequests] = useState<PickupRequest[]>(() => {
@@ -146,6 +184,76 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
 
   const [urgentTeacherAlert, setUrgentTeacherAlert] = useState<PickupRequest | null>(null);
   const [splitViewMode, setSplitViewMode] = useState<boolean>(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [unauthScreen, setUnauthScreen] = useState<'home' | 'auth'>('home');
+  const [googleStrictOnly, setGoogleStrictOnlyState] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('schoolpick_google_strict_only');
+      if (saved !== null) {
+        return saved === 'true';
+      }
+      return true; // Bắt buộc mặc định là true
+    } catch {
+      return true;
+    }
+  });
+
+  const setGoogleStrictOnly = useCallback((val: boolean) => {
+    setGoogleStrictOnlyState(val);
+    try {
+      localStorage.setItem('schoolpick_google_strict_only', String(val));
+    } catch {}
+  }, []);
+
+  const openAuth = useCallback((mode: 'login' | 'signup') => {
+    setAuthMode(mode);
+    setUnauthScreen('auth');
+  }, []);
+
+  const goToHome = useCallback(() => {
+    setUnauthScreen('home');
+  }, []);
+
+  const [users, setUsers] = useState<User[]>(() => {
+    try {
+      const saved = localStorage.getItem('schoolpick_users_v1');
+      if (saved) {
+        const parsed: User[] = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(
+            u =>
+              u &&
+              u.email &&
+              !u.email.toLowerCase().endsWith('.demo') &&
+              u.id !== 'parent-1' &&
+              u.id !== 'teacher-1' &&
+              u.id !== 'admin-1'
+          );
+        }
+      }
+    } catch {}
+    return [];
+  });
+
+  const [students, setStudents] = useState<Student[]>(() => {
+    try {
+      const saved = localStorage.getItem('schoolpick_students_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_STUDENTS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('schoolpick_users_v1', JSON.stringify(users));
+    } catch {}
+  }, [users]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('schoolpick_students_v1', JSON.stringify(students));
+    } catch {}
+  }, [students]);
 
   // Toasts
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -249,35 +357,172 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
     setUrgentTeacherAlert(null);
   }, []);
 
-  const login = (email: string, role?: UserRole): boolean => {
+  const updateUserName = useCallback((newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      addToast('Vui lòng nhập họ và tên hợp lệ.', 'warning');
+      return;
+    }
+    setCurrentUser(prev => {
+      if (!prev) return null;
+      const updated: User = {
+        ...prev,
+        name: trimmed,
+        avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(trimmed)}&backgroundColor=0284c7&textColor=ffffff`,
+      };
+      try {
+        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setUsers(prev =>
+      prev.map(u => (u.id === currentUser?.id || u.email.toLowerCase() === currentUser?.email.toLowerCase()
+        ? { ...u, name: trimmed }
+        : u))
+    );
+
+    if (currentUser?.role === UserRole.PARENT) {
+      setStudents(prev =>
+        prev.map(s => (s.parentId === currentUser?.id ? { ...s, parentName: trimmed } : s))
+      );
+    }
+
+    addToast(`Đã đổi tên thành công: "${trimmed}"`, 'success');
+  }, [currentUser, addToast]);
+
+  const checkUserExists = (email: string): User | null => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) return null;
+    return users.find(u => u.email.toLowerCase() === cleanEmail) || null;
+  };
+
+  const login = (email: string, role?: UserRole, password?: string): LoginResult => {
     try {
       localStorage.removeItem(STORAGE_KEYS.LOGGED_OUT);
     } catch {}
-    const user = INITIAL_USERS.find(
-      u => u.email.toLowerCase() === email.toLowerCase() || (role && u.role === role)
-    );
-    if (user) {
-      setCurrentUser(user);
-      return true;
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      addToast('Vui lòng nhập email đăng nhập.', 'warning');
+      return {
+        success: false,
+        reason: 'EMPTY_FIELDS',
+        message: 'Vui lòng nhập email đăng nhập.',
+      };
     }
-    // Fallback demo user
-    const fallbackUser: User = {
-      id: `user-${Date.now()}`,
-      name: role === UserRole.TEACHER ? 'Cô Lê Thu Hà' : role === UserRole.ADMIN ? 'Thầy Quản Trị' : 'Phụ Huynh Mẫu',
-      email,
-      role: role || UserRole.PARENT,
-      assignedClassId: role === UserRole.TEACHER ? 'class-7a1' : undefined,
-      assignedClassName: role === UserRole.TEACHER ? '7A1' : undefined,
-      childrenIds: role === UserRole.PARENT ? ['student-1', 'student-2'] : undefined,
+
+    // Check existing registered users
+    const existing = users.find(u => u.email.toLowerCase() === cleanEmail);
+    if (!existing) {
+      return {
+        success: false,
+        reason: 'NOT_FOUND',
+        message: 'Tài khoản không tồn tại. Bạn có muốn tạo tài khoản mới không?',
+      };
+    }
+
+    // Check password if provided and user has password
+    if (existing.password && password && existing.password !== password) {
+      return {
+        success: false,
+        reason: 'WRONG_PASSWORD',
+        message: 'Mật khẩu không chính xác. Vui lòng kiểm tra lại.',
+      };
+    }
+
+    const activeRole = role || existing.role;
+    const activeUser: User = {
+      ...existing,
+      role: activeRole,
     };
-    setCurrentUser(fallbackUser);
+    setCurrentUser(activeUser);
+    try {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(activeUser));
+    } catch {}
+    addToast(`Đăng nhập thành công! Chào mừng ${activeUser.name}.`, 'success');
+    return { success: true };
+  };
+
+  const loginWithGoogle = (googleProfile: {
+    name: string;
+    email: string;
+    avatarUrl?: string;
+    role?: UserRole;
+  }): boolean => {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.LOGGED_OUT);
+    } catch {}
+
+    const targetRole = googleProfile.role || UserRole.PARENT;
+    const cleanEmail = googleProfile.email.toLowerCase().trim();
+    const existing = users.find(
+      u => u.email.toLowerCase().trim() === cleanEmail
+    );
+
+    const effectiveAvatar =
+      googleProfile.avatarUrl ||
+      existing?.avatarUrl ||
+      `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
+        googleProfile.name || googleProfile.email
+      )}&backgroundColor=0284c7&textColor=ffffff`;
+
+    let loggedInUser: User;
+    if (existing) {
+      loggedInUser = {
+        ...existing,
+        role: targetRole,
+        avatarUrl: effectiveAvatar,
+        isGoogleAuth: true,
+      };
+      setUsers(prev => prev.map(u => (u.id === existing.id ? loggedInUser : u)));
+    } else {
+      loggedInUser = {
+        id: `google-user-${Date.now()}`,
+        name: googleProfile.name || cleanEmail.split('@')[0],
+        email: cleanEmail,
+        role: targetRole,
+        avatarUrl: effectiveAvatar,
+        isGoogleAuth: true,
+        assignedClassId: targetRole === UserRole.TEACHER ? 'class-7a1' : undefined,
+        assignedClassName: targetRole === UserRole.TEACHER ? '7A1' : undefined,
+        childrenIds: targetRole === UserRole.PARENT ? ['student-1', 'student-2'] : undefined,
+      };
+      setUsers(prev => [loggedInUser, ...prev]);
+    }
+
+    // Save to list of known Google accounts on this device
+    try {
+      const raw = localStorage.getItem('schoolpick_saved_google_accounts');
+      const existingList = raw ? JSON.parse(raw) : [];
+      const updatedList = [
+        {
+          name: loggedInUser.name,
+          email: loggedInUser.email,
+          avatarUrl: loggedInUser.avatarUrl,
+          role: loggedInUser.role,
+          lastLogin: Date.now(),
+        },
+        ...existingList.filter((a: any) => a.email.toLowerCase() !== loggedInUser.email.toLowerCase()),
+      ].slice(0, 8);
+      localStorage.setItem('schoolpick_saved_google_accounts', JSON.stringify(updatedList));
+    } catch {}
+
+    setCurrentUser(loggedInUser);
+    try {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(loggedInUser));
+    } catch {}
+
+    addToast(`Đăng nhập Google thành công: ${loggedInUser.email}`, 'success');
     return true;
   };
 
-  const logout = () => {
+  const performLogout = () => {
     setCurrentUser(null);
     setSplitViewMode(false);
     setUrgentTeacherAlert(null);
+    setUnauthScreen('home');
+    setAuthMode('login');
     try {
       localStorage.setItem(STORAGE_KEYS.LOGGED_OUT, 'true');
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
@@ -285,14 +530,114 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
     addToast('Đã đăng xuất khỏi tài khoản an toàn', 'info');
   };
 
+  const logout = (force: boolean = false) => {
+    if (force) {
+      performLogout();
+      return;
+    }
+    requestConfirmation({
+      title: 'Xác nhận đăng xuất',
+      message: 'Bạn có chắc chắn muốn đăng xuất khỏi hệ thống SchoolPick không? Mọi thông tin phiên làm việc sẽ được lưu an toàn.',
+      confirmLabel: 'Đăng xuất',
+      cancelLabel: 'Ở lại',
+      isDestructive: true,
+      onConfirm: () => {
+        performLogout();
+      },
+    });
+  };
+
+  const registerUser = (params: {
+    name: string;
+    email: string;
+    role: UserRole;
+    phone?: string;
+    studentName?: string;
+    className?: string;
+    password?: string;
+  }): boolean => {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.LOGGED_OUT);
+    } catch {}
+
+    const cleanEmail = params.email.trim().toLowerCase();
+    const existing = users.find(u => u.email.toLowerCase() === cleanEmail);
+    if (existing) {
+      addToast('Email này đã được đăng ký tài khoản. Vui lòng đăng nhập.', 'warning');
+      return false;
+    }
+
+    const newUserId = `user-${Date.now()}`;
+    const newStudentId = `student-${Date.now()}`;
+
+    let createdChildrenIds: string[] | undefined = undefined;
+
+    if (params.role === UserRole.PARENT) {
+      createdChildrenIds = [newStudentId];
+      const newStudent: Student = {
+        id: newStudentId,
+        name: params.studentName?.trim() || 'Học sinh mới',
+        classId: `class-${(params.className || '7A1').toLowerCase().replace(/\s+/g, '')}`,
+        className: params.className?.trim() || '7A1',
+        grade: parseInt((params.className || '7A1').charAt(0), 10) || 7,
+        pickupZoneId: PickupZoneId.ZONE_B,
+        parentId: newUserId,
+        parentName: params.name.trim(),
+        parentPhone: params.phone?.trim() || '0900 000 000',
+      };
+      setStudents(prev => [newStudent, ...prev]);
+    }
+
+    const newUser: User = {
+      id: newUserId,
+      name: params.name.trim(),
+      email: cleanEmail,
+      role: params.role,
+      password: params.password?.trim() || undefined,
+      phone: params.phone?.trim(),
+      avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
+        params.name
+      )}&backgroundColor=0284c7&textColor=ffffff`,
+      assignedClassId:
+        params.role === UserRole.TEACHER
+          ? `class-${(params.className || '7A1').toLowerCase().replace(/\s+/g, '')}`
+          : undefined,
+      assignedClassName: params.role === UserRole.TEACHER ? (params.className?.trim() || '7A1') : undefined,
+      childrenIds: createdChildrenIds,
+    };
+
+    setUsers(prev => [newUser, ...prev]);
+    setCurrentUser(newUser);
+    try {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(newUser));
+    } catch {}
+    addToast(`Đăng ký thành công! Chào mừng ${newUser.name} đến với SchoolPick.`, 'success');
+    return true;
+  };
+
   const switchRole = (role: UserRole) => {
     try {
       localStorage.removeItem(STORAGE_KEYS.LOGGED_OUT);
     } catch {}
-    const matched = INITIAL_USERS.find(u => u.role === role);
-    if (matched) {
-      setCurrentUser(matched);
+    if (currentUser) {
+      const updatedUser: User = {
+        ...currentUser,
+        role,
+        assignedClassId: role === UserRole.TEACHER ? (currentUser.assignedClassId || 'class-7a1') : undefined,
+        assignedClassName: role === UserRole.TEACHER ? (currentUser.assignedClassName || '7A1') : undefined,
+        childrenIds: role === UserRole.PARENT ? (currentUser.childrenIds || ['student-1']) : undefined,
+      };
+      setCurrentUser(updatedUser);
+      try {
+        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(updatedUser));
+      } catch {}
+      addToast(`Đã chuyển sang vai trò: ${role === UserRole.PARENT ? 'Phụ huynh' : role === UserRole.TEACHER ? 'Giáo viên' : 'Quản trị viên'}`, 'info');
+      return;
     }
+    // If not logged in, prompt user to log in with their real account
+    setAuthMode('login');
+    setUnauthScreen('auth');
+    addToast('Vui lòng đăng nhập bằng tài khoản của bạn để tiếp tục.', 'info');
   };
 
   // Helper for current time format HH:mm
@@ -314,7 +659,13 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
     note?: string;
   }): PickupRequest => {
     const student = INITIAL_STUDENTS.find(s => s.id === studentId) || INITIAL_STUDENTS[0];
-    const parent = currentUser || INITIAL_USERS[0];
+    const parent = currentUser || {
+      id: 'parent-current',
+      name: 'Phụ huynh',
+      email: '',
+      role: UserRole.PARENT,
+      phone: '0912 345 678',
+    };
 
     // Compute next queue number
     const maxQueue = requests.reduce((max, r) => Math.max(max, r.queueNumber || 0), 20);
@@ -554,8 +905,8 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
     <SchoolPickContext.Provider
       value={{
         currentUser,
-        users: INITIAL_USERS,
-        students: INITIAL_STUDENTS,
+        users,
+        students,
         zones,
         requests,
         notifications,
@@ -565,6 +916,16 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
         clearUrgentAlert,
         splitViewMode,
         setSplitViewMode,
+        authMode,
+        setAuthMode,
+        unauthScreen,
+        setUnauthScreen,
+        openAuth,
+        goToHome,
+        googleStrictOnly,
+        setGoogleStrictOnly,
+        updateUserName,
+        checkUserExists,
         toasts,
         addToast,
         removeToast,
@@ -572,6 +933,8 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
         requestConfirmation,
         closeConfirmation,
         login,
+        loginWithGoogle,
+        registerUser,
         logout,
         switchRole,
         createPickupRequest,

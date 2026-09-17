@@ -264,9 +264,18 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       {/* Footer User Info & Logout */}
       <div className="p-3 border-t border-slate-200 bg-slate-50/50">
         <div className={`flex items-center ${collapsed ? 'flex-col space-y-2' : 'space-x-2'}`}>
-          <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0">
-            {isTeacher ? '7A' : 'AD'}
-          </div>
+          {currentUser?.avatarUrl ? (
+            <img
+              src={currentUser.avatarUrl}
+              alt={currentUser.name}
+              referrerPolicy="no-referrer"
+              className="w-9 h-9 rounded-xl object-cover border border-slate-200 shadow-xs shrink-0"
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0">
+              {isTeacher ? '7A' : 'AD'}
+            </div>
+          )}
           {!collapsed ? (
             <div className="min-w-0 flex-1 flex items-center justify-between">
               <div className="min-w-0 pr-1">

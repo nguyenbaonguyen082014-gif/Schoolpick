@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Đăng nhập bằng Google - Chọn tài khoản</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background-color: #ffffff;
+      color: #202124;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      font-size: 14px;
+      line-height: 1.4286;
+      user-select: none;
+    }
+    
+    /* Google indeterminate progress bar */
+    #progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background-color: #e0e0e0;
+      overflow: hidden;
+      display: none;
+      z-index: 1000;
+    }
+    #progress-bar-inner {
+      width: 100%;
+      height: 100%;
+      background-color: #1a73e8;
+      position: absolute;
+      transform-origin: left;
+      animation: googleIndeterminate 1.5s infinite linear;
+    }
+    @keyframes googleIndeterminate {
+      0% { transform: translateX(-100%) scaleX(0.2); }
+      50% { transform: translateX(20%) scaleX(0.5); }
+      100% { transform: translateX(100%) scaleX(1); }
+    }
+
+    .container {
+      flex: 1;
+      width: 100%;
+      max-width: 450px;
+      margin: 0 auto;
+      padding: 36px 40px 24px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .google-logo {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 400;
+      color: #202124;
+      margin-bottom: 8px;
+      letter-spacing: -0.2px;
+    }
+
+    .subtitle {
+      font-size: 16px;
+      color: #5f6368;
+      margin-bottom: 20px;
+    }
+
+    .app-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background-color: #e8f0fe;
+      border-radius: 16px;
+      color: #1a73e8;
+      font-weight: 500;
+      font-size: 13px;
+      margin-bottom: 20px;
+      align-self: flex-start;
+    }
+
+    /* Role selector banner */
+    .role-bar {
+      margin-bottom: 18px;
+      background: #f8f9fa;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .role-bar-label {
+      font-size: 12px;
+      color: #5f6368;
+      font-weight: 500;
+    }
+    .role-select {
+      font-size: 12px;
+      font-weight: 500;
+      color: #1a73e8;
+      background: transparent;
+      border: none;
+      outline: none;
+      cursor: pointer;
+    }
+
+    /* Account items list */
+    .account-list {
+      border-top: 1px solid #e0e0e0;
+      margin-top: 4px;
+    }
+
+    .account-item {
+      display: flex;
+      align-items: center;
+      padding: 14px 4px;
+      border-bottom: 1px solid #e0e0e0;
+      cursor: pointer;
+      transition: background-color 0.15s;
+      border-radius: 4px;
+    }
+    .account-item:hover {
+      background-color: #f8f9fa;
+    }
+
+    .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      margin-right: 16px;
+      flex-shrink: 0;
+      object-fit: cover;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 500;
+      font-size: 16px;
+      color: white;
+      background-color: #1a73e8;
+    }
+
+    .account-details {
+      flex: 1;
+      min-width: 0;
+    }
+    .account-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: #202124;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .account-email {
+      font-size: 12px;
+      color: #5f6368;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    .badge-signed-in {
+      font-size: 11px;
+      color: #188038;
+      background: #e6f4ea;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 500;
+      margin-left: 8px;
+      white-space: nowrap;
+    }
+
+    /* Use another account option */
+    .use-another-account {
+      display: flex;
+      align-items: center;
+      padding: 14px 4px;
+      border-bottom: 1px solid #e0e0e0;
+      cursor: pointer;
+      transition: background-color 0.15s;
+      border-radius: 4px;
+      color: #202124;
+      font-weight: 500;
+      font-size: 14px;
+    }
+    .use-another-account:hover {
+      background-color: #f8f9fa;
+    }
+    .use-another-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      margin-right: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #5f6368;
+      border: 1px solid #dadce0;
+      flex-shrink: 0;
+    }
+
+    /* Manual input screen */
+    #view-custom-email {
+      display: none;
+      flex-direction: column;
+    }
+    .input-group {
+      margin-top: 16px;
+      position: relative;
+    }
+    .input-group label {
+      display: block;
+      font-size: 12px;
+      color: #1a73e8;
+      font-weight: 500;
+      margin-bottom: 6px;
+    }
+    .input-control {
+      width: 100%;
+      height: 48px;
+      padding: 12px 14px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 15px;
+      color: #202124;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .input-control:focus {
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 1px #1a73e8;
+    }
+    .error-text {
+      color: #d93025;
+      font-size: 12px;
+      margin-top: 6px;
+      display: none;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 28px;
+    }
+    .btn-secondary {
+      background: none;
+      border: none;
+      color: #1a73e8;
+      font-weight: 500;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 8px 12px;
+      border-radius: 4px;
+    }
+    .btn-secondary:hover {
+      background-color: #f8fafd;
+    }
+    .btn-primary {
+      background-color: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 10px 24px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      box-shadow: 0 1px 2px rgba(60,64,67,0.3);
+      transition: background-color 0.15s, box-shadow 0.15s;
+    }
+    .btn-primary:hover {
+      background-color: #1b66ca;
+      box-shadow: 0 1px 3px 1px rgba(60,64,67,0.15);
+    }
+    .btn-primary:active {
+      background-color: #185abc;
+    }
+
+    /* Footer */
+    footer {
+      padding: 16px 40px;
+      font-size: 12px;
+      color: #5f6368;
+      display: flex;
+      justify-content: space-between;
+      border-top: 1px solid #f1f3f4;
+      background-color: #fafafa;
+    }
+    .footer-links {
+      display: flex;
+      gap: 16px;
+    }
+    .footer-links a {
+      color: #5f6368;
+      text-decoration: none;
+    }
+    .footer-links a:hover {
+      color: #202124;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Google Indeterminate Loading Line -->
+  <div id="progress-bar">
+    <div id="progress-bar-inner"></div>
+  </div>
+
+  <div class="container">
+    <!-- Google Official Colored SVG Icon -->
+    <svg class="google-logo" viewBox="0 0 24 24">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+    </svg>
+
+    <h1>Chọn một tài khoản</h1>
+    <div class="subtitle">để tiếp tục với <b style="color: #202124;">SchoolPick</b></div>
+
+    <!-- Role selection bar -->
+    <div class="role-bar">
+      <span class="role-bar-label">Vai trò đăng nhập:</span>
+      <select id="role-select" class="role-select">
+        <option value="parent">👨‍👩‍👧 Phụ huynh (Đón con)</option>
+        <option value="teacher">👩‍🏫 Giáo viên (Quản lý lớp)</option>
+        <option value="admin">🏛️ Quản trị / BGH</option>
+      </select>
+    </div>
+
+    <!-- VIEW 1: Account Chooser List -->
+    <div id="view-account-list">
+      <div class="account-list" id="account-container">
+        <!-- Accounts will be injected here via JS -->
+      </div>
+
+      <!-- Use another account -->
+      <div class="use-another-account" id="btn-use-another">
+        <div class="use-another-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+          </svg>
+        </div>
+        <span>Sử dụng một tài khoản khác</span>
+      </div>
+    </div>
+
+    <!-- VIEW 2: Use another account form -->
+    <div id="view-custom-email">
+      <div class="input-group">
+        <label for="custom-email-input">Địa chỉ Gmail hoặc Google Workspace:</label>
+        <input 
+          type="email" 
+          id="custom-email-input" 
+          class="input-control" 
+          placeholder="email@gmail.com" 
+          autocomplete="email"
+          autofocus
+        />
+        <div class="error-text" id="email-error">Vui lòng nhập địa chỉ email hợp lệ.</div>
+      </div>
+
+      <div class="input-group" style="margin-top: 12px;">
+        <label for="custom-name-input" style="color: #5f6368;">Họ và tên hiển thị (tùy chọn):</label>
+        <input 
+          type="text" 
+          id="custom-name-input" 
+          class="input-control" 
+          placeholder="Ví dụ: Nguyễn Văn An" 
+        />
+      </div>
+
+      <div class="actions">
+        <button type="button" class="btn-secondary" id="btn-back-to-list">Quay lại</button>
+        <button type="button" class="btn-primary" id="btn-submit-custom">Tiếp theo</button>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>
+    <span>Tiếng Việt</span>
+    <div class="footer-links">
+      <a href="https://support.google.com/accounts" target="_blank" rel="noreferrer">Trợ giúp</a>
+      <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">Bảo mật</a>
+      <a href="https://policies.google.com/terms" target="_blank" rel="noreferrer">Điều khoản</a>
+    </div>
+  </footer>
+
+  <script>
+    (function() {
+      // Parse query params for default role
+      const params = new URLSearchParams(window.location.search);
+      const urlRole = params.get('role');
+      const roleSelect = document.getElementById('role-select');
+      if (urlRole && ['parent', 'teacher', 'admin'].includes(urlRole)) {
+        roleSelect.value = urlRole;
+      }
+
+      let accounts = [];
+
+      try {
+        const raw = localStorage.getItem('schoolpick_saved_google_accounts');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            // Merge unique by email
+            parsed.forEach(acc => {
+              if (
+                acc.email &&
+                !acc.email.toLowerCase().endsWith('.demo') &&
+                !accounts.some(a => a.email.toLowerCase() === acc.email.toLowerCase())
+              ) {
+                accounts.push({
+                  name: acc.name || acc.email.split('@')[0],
+                  email: acc.email,
+                  avatarUrl: acc.avatarUrl,
+                  activeOnDevice: true
+                });
+              }
+            });
+          }
+        }
+      } catch (e) {}
+
+      // If user's account is known from active session or empty, only add if not demo
+      try {
+        const currentUserStr = localStorage.getItem('schoolpick_current_user_v1');
+        if (currentUserStr) {
+          const cu = JSON.parse(currentUserStr);
+          if (cu && cu.email && !cu.email.toLowerCase().endsWith('.demo') && !accounts.some(a => a.email.toLowerCase() === cu.email.toLowerCase())) {
+            accounts.unshift({
+              name: cu.name || cu.email.split('@')[0],
+              email: cu.email,
+              avatarUrl: cu.avatarUrl,
+              activeOnDevice: true
+            });
+          }
+        }
+      } catch (e) {}
+
+      // Render accounts
+      const container = document.getElementById('account-container');
+      container.innerHTML = '';
+
+      accounts.forEach(acc => {
+        const item = document.createElement('div');
+        item.className = 'account-item';
+        
+        let avatarHtml = '';
+        if (acc.avatarUrl) {
+          avatarHtml = `<img class="avatar" src="${acc.avatarUrl}" alt="${acc.name}">`;
+        } else {
+          const initial = (acc.name || acc.email || 'G').charAt(0).toUpperCase();
+          avatarHtml = `<div class="avatar">${initial}</div>`;
+        }
+
+        item.innerHTML = `
+          ${avatarHtml}
+          <div class="account-details">
+            <div class="account-name">${acc.name}</div>
+            <div class="account-email">${acc.email}</div>
+          </div>
+          ${acc.activeOnDevice ? '<span class="badge-signed-in">Có sẵn trên máy</span>' : ''}
+        `;
+
+        item.addEventListener('click', () => {
+          selectAccount(acc.name, acc.email, acc.avatarUrl);
+        });
+
+        container.appendChild(item);
+      });
+
+      // View switching
+      const viewList = document.getElementById('view-account-list');
+      const viewCustom = document.getElementById('view-custom-email');
+      const btnUseAnother = document.getElementById('btn-use-another');
+      const btnBackToList = document.getElementById('btn-back-to-list');
+      const btnSubmitCustom = document.getElementById('btn-submit-custom');
+      const customEmailInput = document.getElementById('custom-email-input');
+      const customNameInput = document.getElementById('custom-name-input');
+      const emailError = document.getElementById('email-error');
+
+      btnUseAnother.addEventListener('click', () => {
+        viewList.style.display = 'none';
+        viewCustom.style.display = 'flex';
+        customEmailInput.focus();
+      });
+
+      btnBackToList.addEventListener('click', () => {
+        viewCustom.style.display = 'none';
+        viewList.style.display = 'block';
+        emailError.style.display = 'none';
+      });
+
+      btnSubmitCustom.addEventListener('click', submitCustomAccount);
+      customEmailInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitCustomAccount();
+      });
+
+      function submitCustomAccount() {
+        const email = customEmailInput.value.trim().toLowerCase();
+        if (!email || !email.includes('@') || !email.includes('.')) {
+          emailError.style.display = 'block';
+          customEmailInput.focus();
+          return;
+        }
+        emailError.style.display = 'none';
+
+        let name = customNameInput.value.trim();
+        if (!name) {
+          const part = email.split('@')[0];
+          name = part.split(/[._-]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        }
+
+        const avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=0284c7&textColor=ffffff`;
+        selectAccount(name, email, avatar);
+      }
+
+      function selectAccount(name, email, avatarUrl) {
+        // Show Google progress line
+        document.getElementById('progress-bar').style.display = 'block';
+
+        const role = roleSelect.value || 'parent';
+
+        // Remember to device's list
+        try {
+          const raw = localStorage.getItem('schoolpick_saved_google_accounts');
+          const list = raw ? JSON.parse(raw) : [];
+          const updated = [
+            { name, email, avatarUrl, role, lastLogin: Date.now() },
+            ...list.filter(a => a.email.toLowerCase() !== email.toLowerCase())
+          ].slice(0, 10);
+          localStorage.setItem('schoolpick_saved_google_accounts', JSON.stringify(updated));
+        } catch (e) {}
+
+        const payload = {
+          type: 'GOOGLE_SIGNIN_SUCCESS',
+          user: {
+            name,
+            email,
+            avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=0284c7&textColor=ffffff`,
+            role: role
+          }
+        };
+
+        // Always store in localStorage so cross-tab storage event triggers even if postMessage fails
+        try {
+          localStorage.setItem('schoolpick_direct_google_auth', JSON.stringify(payload.user));
+        } catch (e) {}
+
+        // Post message to opener window
+        if (window.opener && !window.opener.closed) {
+          try {
+            window.opener.postMessage(payload, '*');
+          } catch (e) {
+            console.error('postMessage error', e);
+          }
+          setTimeout(() => {
+            window.close();
+          }, 350);
+        } else {
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 350);
+        }
+      }
+
+    })();
+  </script>
+</body>
+</html>

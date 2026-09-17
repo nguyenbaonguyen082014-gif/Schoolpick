@@ -10,32 +10,7 @@ import {
   NotificationItem,
 } from '../types';
 
-export const INITIAL_USERS: User[] = [
-  {
-    id: 'parent-1',
-    name: 'Nguyễn Văn An',
-    email: 'parent@schoolpick.demo',
-    role: UserRole.PARENT,
-    phone: '0912 345 678',
-    childrenIds: ['student-1', 'student-2'],
-  },
-  {
-    id: 'teacher-1',
-    name: 'Cô Hoàng Lan',
-    email: 'teacher@schoolpick.demo',
-    role: UserRole.TEACHER,
-    phone: '0988 765 432',
-    assignedClassId: 'class-7a1',
-    assignedClassName: '7A1',
-  },
-  {
-    id: 'admin-1',
-    name: 'Thầy Trần Văn Đức (BGH)',
-    email: 'admin@schoolpick.demo',
-    role: UserRole.ADMIN,
-    phone: '0903 112 233',
-  },
-];
+export const INITIAL_USERS: User[] = [];
 
 export const INITIAL_ZONES: PickupZone[] = [
   {
