@@ -11,7 +11,9 @@ import {
   NotificationItem,
   ToastItem,
   LoginResult,
+  RegisterResult,
 } from '../types';
+import { validateRealGmail, validateRealPhoneNumber } from '../utils/validators';
 import {
   INITIAL_USERS,
   INITIAL_STUDENTS,
@@ -81,7 +83,7 @@ interface SchoolPickContextType {
     studentName?: string;
     className?: string;
     password?: string;
-  }) => boolean;
+  }) => RegisterResult;
   logout: (force?: boolean) => void;
   switchRole: (role: UserRole) => void;
   createPickupRequest: (params: {
@@ -555,20 +557,58 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
     studentName?: string;
     className?: string;
     password?: string;
-  }): boolean => {
+  }): RegisterResult => {
     try {
       localStorage.removeItem(STORAGE_KEYS.LOGGED_OUT);
     } catch {}
 
-    const cleanEmail = params.email.trim().toLowerCase();
+    // 1. Verify Real Gmail Address
+    const gmailValidation = validateRealGmail(params.email);
+    if (!gmailValidation.isValid) {
+      addToast(gmailValidation.reason || 'Địa chỉ Gmail không tồn tại hoặc không hợp lệ.', 'warning');
+      return {
+        success: false,
+        field: 'email',
+        message: gmailValidation.reason || 'Địa chỉ Gmail không tồn tại hoặc không hợp lệ. Vui lòng nhập Gmail thật của bạn.',
+      };
+    }
+
+    const cleanEmail = gmailValidation.cleanEmail || params.email.trim().toLowerCase();
+
+    // 2. Check if Gmail is already registered
     const existing = users.find(u => u.email.toLowerCase() === cleanEmail);
     if (existing) {
-      addToast('Email này đã được đăng ký tài khoản. Vui lòng đăng nhập.', 'warning');
-      return false;
+      addToast('Địa chỉ Gmail này đã được đăng ký tài khoản.', 'warning');
+      return {
+        success: false,
+        field: 'email',
+        message: 'Địa chỉ Gmail này đã được đăng ký tài khoản trên hệ thống. Vui lòng chuyển sang Đăng nhập.',
+      };
+    }
+
+    // 3. Verify Real Vietnamese Phone Number
+    const phoneValidation = validateRealPhoneNumber(params.phone || '');
+    if (!phoneValidation.isValid) {
+      addToast(phoneValidation.reason || 'Số điện thoại không tồn tại hoặc không hợp lệ.', 'warning');
+      return {
+        success: false,
+        field: 'phone',
+        message: phoneValidation.reason || 'Số điện thoại không tồn tại hoặc không hợp lệ. Vui lòng nhập số điện thoại thật của bạn.',
+      };
+    }
+
+    // 4. Verify Student Name for Parents
+    if (params.role === UserRole.PARENT && !params.studentName?.trim()) {
+      return {
+        success: false,
+        field: 'studentName',
+        message: 'Vui lòng nhập họ và tên của học sinh (con bạn).',
+      };
     }
 
     const newUserId = `user-${Date.now()}`;
     const newStudentId = `student-${Date.now()}`;
+    const cleanPhone = phoneValidation.formattedPhone || params.phone?.trim() || '';
 
     let createdChildrenIds: string[] | undefined = undefined;
 
@@ -583,7 +623,7 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
         pickupZoneId: PickupZoneId.ZONE_B,
         parentId: newUserId,
         parentName: params.name.trim(),
-        parentPhone: params.phone?.trim() || '0900 000 000',
+        parentPhone: cleanPhone,
       };
       setStudents(prev => [newStudent, ...prev]);
     }
@@ -594,7 +634,7 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
       email: cleanEmail,
       role: params.role,
       password: params.password?.trim() || undefined,
-      phone: params.phone?.trim(),
+      phone: cleanPhone,
       avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
         params.name
       )}&backgroundColor=0284c7&textColor=ffffff`,
@@ -612,7 +652,7 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(newUser));
     } catch {}
     addToast(`Đăng ký thành công! Chào mừng ${newUser.name} đến với SchoolPick.`, 'success');
-    return true;
+    return { success: true };
   };
 
   const switchRole = (role: UserRole) => {

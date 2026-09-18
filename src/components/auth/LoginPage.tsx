@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { useSchoolPick } from '../../context/SchoolPickContext';
 import { UserRole } from '../../types';
+import { validateRealGmail, validateRealPhoneNumber } from '../../utils/validators';
 
 // Helper to generate Google-style secure password
 const generateGoogleSecurePassword = () => {
@@ -123,10 +124,35 @@ export const LoginPage: React.FC = () => {
       setSignupErrorMessage('Vui lòng nhập họ và tên của bạn.');
       return;
     }
-    if (!signupEmail.trim() || !signupEmail.includes('@')) {
-      setSignupErrorMessage('Vui lòng nhập địa chỉ email hợp lệ.');
+
+    // 1. Strict validation: Only real Gmail (@gmail.com) is allowed
+    const gmailRes = validateRealGmail(signupEmail);
+    if (!gmailRes.isValid) {
+      setSignupErrorMessage(
+        gmailRes.reason || 'Địa chỉ Gmail không tồn tại hoặc không hợp lệ. Chỉ chấp nhận Gmail thật (@gmail.com).'
+      );
       return;
     }
+
+    // Check if account already exists with this Gmail
+    const existing = checkUserExists(gmailRes.cleanEmail || signupEmail);
+    if (existing) {
+      setSignupErrorMessage(
+        `Tài khoản Gmail "${gmailRes.cleanEmail || signupEmail}" đã được đăng ký bởi ${existing.name}. Bạn có muốn chuyển sang Đăng nhập không?`
+      );
+      return;
+    }
+
+    // 2. Strict validation: Real Vietnamese mobile phone number is required
+    const phoneRes = validateRealPhoneNumber(signupPhone);
+    if (!phoneRes.isValid) {
+      setSignupErrorMessage(
+        phoneRes.reason || 'Số điện thoại không tồn tại hoặc không hợp lệ. Vui lòng nhập số điện thoại thật của bạn.'
+      );
+      return;
+    }
+
+    // 3. Parent must provide student name
     if (signupRole === UserRole.PARENT && !signupStudentName.trim()) {
       setSignupErrorMessage('Vui lòng nhập họ tên của học sinh (con bạn).');
       return;
@@ -138,15 +164,20 @@ export const LoginPage: React.FC = () => {
       return;
     }
 
-    registerUser({
+    const regResult = registerUser({
       name: signupName.trim(),
-      email: signupEmail.trim(),
+      email: gmailRes.cleanEmail || signupEmail.trim(),
       role: signupRole,
-      phone: signupPhone.trim() || undefined,
+      phone: phoneRes.formattedPhone || signupPhone.trim(),
       studentName: signupRole === UserRole.PARENT ? signupStudentName.trim() : undefined,
       className: signupClassName.trim() || '7A1',
       password: finalPassword.trim() || undefined,
     });
+
+    if (!regResult.success) {
+      setSignupErrorMessage(regResult.message || 'Đăng ký không thành công. Vui lòng kiểm tra lại thông tin.');
+      return;
+    }
   };
 
 interface SavedGoogleAccount {
@@ -1006,9 +1037,26 @@ interface SavedGoogleAccount {
           {/* Sign Up Form */}
           <form onSubmit={handleSignupSubmit} className="space-y-4">
             {signupErrorMessage && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 font-bold flex items-center space-x-2">
-                <Info className="w-4 h-4 shrink-0" />
-                <span>{signupErrorMessage}</span>
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium flex items-start space-x-2.5 animate-in fade-in duration-200">
+                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-bold text-rose-900 text-xs sm:text-sm">Thông báo kiểm tra thông tin đăng ký</p>
+                  <p className="mt-0.5 text-xs text-rose-700 leading-relaxed">{signupErrorMessage}</p>
+                  {signupErrorMessage.includes('đăng ký') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail(signupEmail.trim().toLowerCase());
+                        setSelectedRole(signupRole);
+                        setAuthMode('login');
+                      }}
+                      className="mt-2 inline-flex items-center space-x-1 px-3 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold rounded-lg text-xs transition-colors cursor-pointer"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      <span>Chuyển sang trang Đăng nhập ngay</span>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1026,7 +1074,10 @@ interface SavedGoogleAccount {
                   type="text"
                   required
                   value={signupName}
-                  onChange={e => setSignupName(e.target.value)}
+                  onChange={e => {
+                    setSignupName(e.target.value);
+                    if (signupErrorMessage) setSignupErrorMessage('');
+                  }}
                   placeholder="Nhập họ và tên đầy đủ của bạn (ví dụ: Nguyễn Bảo Nguyên)"
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
@@ -1034,11 +1085,17 @@ interface SavedGoogleAccount {
             </div>
 
             {/* Email & Phone Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {/* Real Gmail Input with strict validation */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Địa chỉ Email <span className="text-red-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Địa chỉ Gmail thật <span className="text-red-500">*</span>
+                  </label>
+                  <span className="text-[10px] text-blue-600 font-semibold bg-blue-50 px-1.5 py-0.5 rounded">
+                    Chỉ nhận @gmail.com
+                  </span>
+                </div>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <Mail className="w-4 h-4" />
@@ -1048,17 +1105,79 @@ interface SavedGoogleAccount {
                     type="email"
                     required
                     value={signupEmail}
-                    onChange={e => setSignupEmail(e.target.value)}
+                    onChange={e => {
+                      setSignupEmail(e.target.value);
+                      if (signupErrorMessage) setSignupErrorMessage('');
+                    }}
                     placeholder="tenban@gmail.com"
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
                   />
                 </div>
+
+                {/* Real-time Gmail validation status */}
+                {(() => {
+                  const clean = signupEmail.trim().toLowerCase();
+                  if (!clean) {
+                    return (
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        * Nhập Gmail thật của bạn (ví dụ: nguyenbaonguyen082014@gmail.com).
+                      </p>
+                    );
+                  }
+
+                  const validation = validateRealGmail(clean);
+                  const exists = checkUserExists(validation.cleanEmail || clean);
+
+                  if (exists) {
+                    return (
+                      <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-xl text-xs flex items-center justify-between text-amber-900 animate-in fade-in duration-150">
+                        <div className="flex items-center space-x-1.5 truncate mr-2">
+                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span className="truncate">Gmail đã có tài khoản ({exists.name})</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEmail(validation.cleanEmail || clean);
+                            setSelectedRole(exists.role);
+                            setAuthMode('login');
+                          }}
+                          className="font-bold text-blue-600 hover:underline cursor-pointer text-[11px] shrink-0"
+                        >
+                          Đăng nhập &rarr;
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  if (validation.isValid) {
+                    return (
+                      <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs flex items-center space-x-1.5 text-emerald-800 font-semibold animate-in fade-in duration-150">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="truncate">✓ Gmail thật hợp lệ: <b>{validation.cleanEmail}</b></span>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="mt-1.5 p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs flex items-start space-x-1.5 text-rose-800 animate-in fade-in duration-150">
+                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <span className="text-[11px] leading-tight font-medium text-rose-700">{validation.reason}</span>
+                      </div>
+                    );
+                  }
+                })()}
               </div>
 
+              {/* Real Phone Number Input with strict validation */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Số điện thoại
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Số điện thoại di động <span className="text-red-500">*</span>
+                  </label>
+                  <span className="text-[10px] text-slate-500 font-medium">
+                    10 số (03, 05, 07, 08, 09)
+                  </span>
+                </div>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <Phone className="w-4 h-4" />
@@ -1066,12 +1185,47 @@ interface SavedGoogleAccount {
                   <input
                     id="input-signup-phone"
                     type="tel"
+                    required
                     value={signupPhone}
-                    onChange={e => setSignupPhone(e.target.value)}
-                    placeholder="0912 345 678"
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    onChange={e => {
+                      setSignupPhone(e.target.value);
+                      if (signupErrorMessage) setSignupErrorMessage('');
+                    }}
+                    placeholder="VD: 0912 345 678"
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
                   />
                 </div>
+
+                {/* Real-time Phone validation status */}
+                {(() => {
+                  const raw = signupPhone.trim();
+                  if (!raw) {
+                    return (
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        * Bắt buộc số điện thoại thật để nhà trường liên hệ đón học sinh.
+                      </p>
+                    );
+                  }
+
+                  const validation = validateRealPhoneNumber(raw);
+                  if (validation.isValid) {
+                    return (
+                      <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs flex items-center space-x-1.5 text-emerald-800 font-semibold animate-in fade-in duration-150">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="truncate">
+                          ✓ Số điện thoại thật ({validation.carrier}): <b>{validation.formattedPhone}</b>
+                        </span>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="mt-1.5 p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs flex items-start space-x-1.5 text-rose-800 animate-in fade-in duration-150">
+                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <span className="text-[11px] leading-tight font-medium text-rose-700">{validation.reason}</span>
+                      </div>
+                    );
+                  }
+                })()}
               </div>
             </div>
 

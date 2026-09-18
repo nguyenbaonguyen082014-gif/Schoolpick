@@ -70,6 +70,12 @@ export interface LoginResult {
   message?: string;
 }
 
+export interface RegisterResult {
+  success: boolean;
+  message?: string;
+  field?: 'name' | 'email' | 'phone' | 'studentName' | 'password';
+}
+
 export interface PickupRequest {
   id: string;
   queueNumber: number;
