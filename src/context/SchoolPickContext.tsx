@@ -13,7 +13,7 @@ import {
   LoginResult,
   RegisterResult,
 } from '../types';
-import { validateRealGmail, validateRealPhoneNumber } from '../utils/validators';
+import { validateRealEmail, validateRealPhoneNumber } from '../utils/validators';
 import {
   INITIAL_USERS,
   INITIAL_STUDENTS,
@@ -74,7 +74,7 @@ interface SchoolPickContextType {
     email: string;
     avatarUrl?: string;
     role?: UserRole;
-  }) => boolean;
+  }) => LoginResult;
   registerUser: (params: {
     name: string;
     email: string;
@@ -103,18 +103,33 @@ interface SchoolPickContextType {
   activeRequests: PickupRequest[];
   historyRequests: PickupRequest[];
   unreadNotificationCount: number;
+  clearAllAccounts: () => void;
 }
 
 const SchoolPickContext = createContext<SchoolPickContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
-  CURRENT_USER: 'schoolpick_current_user_v1',
-  LOGGED_OUT: 'schoolpick_logged_out_v1',
+  CURRENT_USER: 'schoolpick_current_user_v2',
+  LOGGED_OUT: 'schoolpick_logged_out_v2',
   REQUESTS: 'schoolpick_requests_v1',
   NOTIFICATIONS: 'schoolpick_notifications_v1',
   SOUND_ENABLED: 'schoolpick_sound_enabled_v1',
   ZONES: 'schoolpick_zones_v1',
 };
+
+// Immediate cleanup of old accounts as requested by user
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    localStorage.removeItem('schoolpick_users_v1');
+    localStorage.removeItem('schoolpick_users');
+    localStorage.removeItem('schoolpick_current_user_v1');
+    localStorage.removeItem('schoolpick_current_user');
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    localStorage.setItem(STORAGE_KEYS.LOGGED_OUT, 'true');
+  }
+} catch {
+  // Safe fallback
+}
 
 // Cross-tab broadcast channel
 let broadcastChannel: BroadcastChannel | null = null;
@@ -186,8 +201,8 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
 
   const [urgentTeacherAlert, setUrgentTeacherAlert] = useState<PickupRequest | null>(null);
   const [splitViewMode, setSplitViewMode] = useState<boolean>(false);
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
-  const [unauthScreen, setUnauthScreen] = useState<'home' | 'auth'>('home');
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('signup');
+  const [unauthScreen, setUnauthScreen] = useState<'home' | 'auth'>('auth');
   const [googleStrictOnly, setGoogleStrictOnlyState] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('schoolpick_google_strict_only');
@@ -216,9 +231,10 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
     setUnauthScreen('home');
   }, []);
 
+  // All current accounts deleted as requested - starts with clean empty state
   const [users, setUsers] = useState<User[]>(() => {
     try {
-      const saved = localStorage.getItem('schoolpick_users_v1');
+      const saved = localStorage.getItem('schoolpick_users_v2');
       if (saved) {
         const parsed: User[] = JSON.parse(saved);
         if (Array.isArray(parsed)) {
@@ -237,6 +253,33 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
     return [];
   });
 
+  // Toasts
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const addToast = useCallback((message: string, type: 'success' | 'info' | 'warning' | 'error' = 'success') => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    setToasts(prev => [...prev, { id, message, type, timestamp: Date.now() }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  }, []);
+
+  const clearAllAccounts = useCallback(() => {
+    setUsers([]);
+    setCurrentUser(null);
+    setAuthMode('signup');
+    setUnauthScreen('auth');
+    try {
+      localStorage.removeItem('schoolpick_users_v2');
+      localStorage.removeItem('schoolpick_users_v1');
+      localStorage.removeItem('schoolpick_users');
+      localStorage.removeItem('schoolpick_current_user_v2');
+      localStorage.removeItem('schoolpick_current_user_v1');
+      localStorage.removeItem('schoolpick_current_user');
+      localStorage.setItem(STORAGE_KEYS.LOGGED_OUT, 'true');
+    } catch {}
+    addToast('Đã xóa toàn bộ tài khoản. Bạn có thể tạo tài khoản mới ngay bây giờ!', 'success');
+  }, [addToast]);
+
   const [students, setStudents] = useState<Student[]>(() => {
     try {
       const saved = localStorage.getItem('schoolpick_students_v1');
@@ -247,7 +290,7 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
 
   useEffect(() => {
     try {
-      localStorage.setItem('schoolpick_users_v1', JSON.stringify(users));
+      localStorage.setItem('schoolpick_users_v2', JSON.stringify(users));
     } catch {}
   }, [users]);
 
@@ -256,16 +299,6 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
       localStorage.setItem('schoolpick_students_v1', JSON.stringify(students));
     } catch {}
   }, [students]);
-
-  // Toasts
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-  const addToast = useCallback((message: string, type: 'success' | 'info' | 'warning' | 'error' = 'success') => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    setToasts(prev => [...prev, { id, message, type, timestamp: Date.now() }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
-  }, []);
 
   const removeToast = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
@@ -451,49 +484,75 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
     email: string;
     avatarUrl?: string;
     role?: UserRole;
-  }): boolean => {
+  }): LoginResult => {
     try {
       localStorage.removeItem(STORAGE_KEYS.LOGGED_OUT);
     } catch {}
 
-    const targetRole = googleProfile.role || UserRole.PARENT;
-    const cleanEmail = googleProfile.email.toLowerCase().trim();
+    const cleanEmail = (googleProfile.email || '').toLowerCase().trim();
+    if (!cleanEmail) {
+      addToast('Vui lòng cung cấp địa chỉ email Google.', 'warning');
+      return {
+        success: false,
+        reason: 'EMPTY_FIELDS',
+        message: 'Vui lòng cung cấp địa chỉ email Google.',
+      };
+    }
+
+    // 1. Kiểm tra xem mail họ dùng có tồn tại và hợp lệ hay không (Định dạng, nhà cung cấp, không phải mail ảo)
+    const emailRes = validateRealEmail(cleanEmail);
+    if (!emailRes.isValid) {
+      const errorMsg = emailRes.reason || 'Địa chỉ email Google không tồn tại hoặc không hợp lệ.';
+      addToast(errorMsg, 'error');
+      return {
+        success: false,
+        reason: 'INVALID_EMAIL',
+        message: errorMsg,
+        email: cleanEmail,
+      };
+    }
+
+    // 2. Xem thử mail đó đã có tài khoản trên hệ thống chưa
     const existing = users.find(
       u => u.email.toLowerCase().trim() === cleanEmail
     );
 
-    const effectiveAvatar =
-      googleProfile.avatarUrl ||
-      existing?.avatarUrl ||
-      `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
-        googleProfile.name || googleProfile.email
-      )}&backgroundColor=0284c7&textColor=ffffff`;
-
-    let loggedInUser: User;
-    if (existing) {
-      loggedInUser = {
-        ...existing,
-        role: targetRole,
-        avatarUrl: effectiveAvatar,
-        isGoogleAuth: true,
-      };
-      setUsers(prev => prev.map(u => (u.id === existing.id ? loggedInUser : u)));
-    } else {
-      loggedInUser = {
-        id: `google-user-${Date.now()}`,
-        name: googleProfile.name || cleanEmail.split('@')[0],
+    if (!existing) {
+      const notFoundMsg = `Tài khoản với email "${cleanEmail}" chưa được đăng ký trên hệ thống SchoolPick. Vui lòng tạo tài khoản mới trước khi đăng nhập bằng Google.`;
+      addToast(notFoundMsg, 'warning');
+      return {
+        success: false,
+        reason: 'NOT_FOUND',
+        message: notFoundMsg,
         email: cleanEmail,
-        role: targetRole,
-        avatarUrl: effectiveAvatar,
-        isGoogleAuth: true,
-        assignedClassId: targetRole === UserRole.TEACHER ? 'class-7a1' : undefined,
-        assignedClassName: targetRole === UserRole.TEACHER ? '7A1' : undefined,
-        childrenIds: targetRole === UserRole.PARENT ? ['student-1', 'student-2'] : undefined,
+        googleProfile: {
+          name: googleProfile.name,
+          email: cleanEmail,
+          avatarUrl: googleProfile.avatarUrl,
+          role: googleProfile.role || UserRole.PARENT,
+        },
       };
-      setUsers(prev => [loggedInUser, ...prev]);
     }
 
-    // Save to list of known Google accounts on this device
+    // 3. Sau khi xác thực tài khoản đã tồn tại, mới cho phép họ vào tài khoản của mình!
+    const targetRole = googleProfile.role || existing.role;
+    const effectiveAvatar =
+      googleProfile.avatarUrl ||
+      existing.avatarUrl ||
+      `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
+        existing.name || cleanEmail
+      )}&backgroundColor=0284c7&textColor=ffffff`;
+
+    const loggedInUser: User = {
+      ...existing,
+      role: targetRole,
+      avatarUrl: effectiveAvatar,
+      isGoogleAuth: true,
+    };
+
+    setUsers(prev => prev.map(u => (u.id === existing.id ? loggedInUser : u)));
+
+    // Lưu vào danh sách các tài khoản Google đã từng sử dụng trên thiết bị
     try {
       const raw = localStorage.getItem('schoolpick_saved_google_accounts');
       const existingList = raw ? JSON.parse(raw) : [];
@@ -515,8 +574,11 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(loggedInUser));
     } catch {}
 
-    addToast(`Đăng nhập Google thành công: ${loggedInUser.email}`, 'success');
-    return true;
+    addToast(`Đăng nhập Google thành công! Chào mừng ${loggedInUser.name}.`, 'success');
+    return {
+      success: true,
+      user: loggedInUser,
+    };
   };
 
   const performLogout = () => {
@@ -562,27 +624,27 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
       localStorage.removeItem(STORAGE_KEYS.LOGGED_OUT);
     } catch {}
 
-    // 1. Verify Real Gmail Address
-    const gmailValidation = validateRealGmail(params.email);
-    if (!gmailValidation.isValid) {
-      addToast(gmailValidation.reason || 'Địa chỉ Gmail không tồn tại hoặc không hợp lệ.', 'warning');
+    // 1. Verify Real Email Address (FPT, Edu.vn, Gmail, Yahoo, Outlook, etc.)
+    const emailValidation = validateRealEmail(params.email);
+    if (!emailValidation.isValid) {
+      addToast(emailValidation.reason || 'Email không tồn tại.', 'warning');
       return {
         success: false,
         field: 'email',
-        message: gmailValidation.reason || 'Địa chỉ Gmail không tồn tại hoặc không hợp lệ. Vui lòng nhập Gmail thật của bạn.',
+        message: emailValidation.reason || 'Email không tồn tại.',
       };
     }
 
-    const cleanEmail = gmailValidation.cleanEmail || params.email.trim().toLowerCase();
+    const cleanEmail = emailValidation.cleanEmail || params.email.trim().toLowerCase();
 
-    // 2. Check if Gmail is already registered
+    // 2. Check if Email is already registered
     const existing = users.find(u => u.email.toLowerCase() === cleanEmail);
     if (existing) {
-      addToast('Địa chỉ Gmail này đã được đăng ký tài khoản.', 'warning');
+      addToast('Địa chỉ Email này đã được đăng ký tài khoản.', 'warning');
       return {
         success: false,
         field: 'email',
-        message: 'Địa chỉ Gmail này đã được đăng ký tài khoản trên hệ thống. Vui lòng chuyển sang Đăng nhập.',
+        message: 'Địa chỉ Email này đã được đăng ký tài khoản trên hệ thống. Vui lòng chuyển sang Đăng nhập.',
       };
     }
 
@@ -987,6 +1049,7 @@ export const SchoolPickProvider: React.FC<{ children: ReactNode }> = ({ children
         activeRequests,
         historyRequests,
         unreadNotificationCount,
+        clearAllAccounts,
       }}
     >
       {children}

@@ -394,6 +394,30 @@
       </div>
     </div>
 
+    <!-- VIEW 3: Account Not Found in SchoolPick -->
+    <div id="view-not-found" style="display: none; flex-direction: column; text-align: center; padding: 8px 0;">
+      <div style="width: 52px; height: 52px; border-radius: 50%; background-color: #fffbeb; color: #d97706; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; border: 1px solid #fde68a;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </div>
+      <h2 style="font-size: 17px; font-weight: 600; color: #1e293b; margin: 0 0 6px;">Chưa có tài khoản SchoolPick</h2>
+      <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0 0 16px;">
+        Email <b id="not-found-email" style="color: #0f172a;"></b> chưa được đăng ký tài khoản trong hệ thống SchoolPick. Bạn cần đăng ký tài khoản trước khi có thể đăng nhập.
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <button type="button" class="btn-primary" id="btn-goto-signup" style="width: 100%; padding: 11px; font-weight: 600; background-color: #0284c7;">
+          👉 Đăng ký tài khoản với email này ngay
+        </button>
+        <button type="button" class="btn-secondary" id="btn-not-found-back" style="width: 100%; padding: 8px;">
+          Chọn tài khoản khác
+        </button>
+      </div>
+    </div>
+
   </div>
 
   <footer>
@@ -457,6 +481,13 @@
         }
       } catch (e) {}
 
+      // Get registered users from SchoolPick database
+      let registeredUsers = [];
+      try {
+        const rawUsers = localStorage.getItem('schoolpick_users_v2');
+        if (rawUsers) registeredUsers = JSON.parse(rawUsers);
+      } catch (e) {}
+
       // Render accounts
       const container = document.getElementById('account-container');
       container.innerHTML = '';
@@ -473,13 +504,21 @@
           avatarHtml = `<div class="avatar">${initial}</div>`;
         }
 
+        const isRegistered = Array.isArray(registeredUsers) && registeredUsers.some(function(u) {
+          return u && u.email && u.email.toLowerCase().trim() === acc.email.toLowerCase().trim();
+        });
+
+        const statusBadge = isRegistered 
+          ? '<span style="font-size: 10px; font-weight: bold; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 6px; border-radius: 4px; margin-left: auto;">Đã có tài khoản</span>'
+          : '<span style="font-size: 10px; font-weight: bold; background: #fffbeb; color: #b45309; border: 1px solid #fde68a; padding: 2px 6px; border-radius: 4px; margin-left: auto;">Chưa có tài khoản</span>';
+
         item.innerHTML = `
           ${avatarHtml}
-          <div class="account-details">
+          <div class="account-details" style="flex: 1; min-width: 0;">
             <div class="account-name">${acc.name}</div>
             <div class="account-email">${acc.email}</div>
           </div>
-          ${acc.activeOnDevice ? '<span class="badge-signed-in">Có sẵn trên máy</span>' : ''}
+          ${statusBadge}
         `;
 
         item.addEventListener('click', () => {
@@ -492,23 +531,55 @@
       // View switching
       const viewList = document.getElementById('view-account-list');
       const viewCustom = document.getElementById('view-custom-email');
+      const viewNotFound = document.getElementById('view-not-found');
+      const notFoundEmailEl = document.getElementById('not-found-email');
       const btnUseAnother = document.getElementById('btn-use-another');
       const btnBackToList = document.getElementById('btn-back-to-list');
       const btnSubmitCustom = document.getElementById('btn-submit-custom');
+      const btnGotoSignup = document.getElementById('btn-goto-signup');
+      const btnNotFoundBack = document.getElementById('btn-not-found-back');
       const customEmailInput = document.getElementById('custom-email-input');
       const customNameInput = document.getElementById('custom-name-input');
       const emailError = document.getElementById('email-error');
 
+      let pendingSignupProfile = null;
+
       btnUseAnother.addEventListener('click', () => {
         viewList.style.display = 'none';
+        viewNotFound.style.display = 'none';
         viewCustom.style.display = 'flex';
         customEmailInput.focus();
       });
 
       btnBackToList.addEventListener('click', () => {
         viewCustom.style.display = 'none';
+        viewNotFound.style.display = 'none';
         viewList.style.display = 'block';
         emailError.style.display = 'none';
+      });
+
+      btnNotFoundBack.addEventListener('click', () => {
+        viewNotFound.style.display = 'none';
+        viewList.style.display = 'block';
+      });
+
+      btnGotoSignup.addEventListener('click', () => {
+        if (pendingSignupProfile) {
+          const payload = {
+            type: 'GOOGLE_SIGNUP_PREFILL',
+            user: pendingSignupProfile
+          };
+          if (window.opener && !window.opener.closed) {
+            try {
+              window.opener.postMessage(payload, '*');
+            } catch (e) {}
+            setTimeout(() => {
+              window.close();
+            }, 250);
+          } else {
+            window.location.href = '/';
+          }
+        }
       });
 
       btnSubmitCustom.addEventListener('click', submitCustomAccount);
@@ -536,18 +607,53 @@
       }
 
       function selectAccount(name, email, avatarUrl) {
-        // Show Google progress line
-        document.getElementById('progress-bar').style.display = 'block';
+        const cleanEmail = (email || '').trim().toLowerCase();
+
+        // 1. Kiểm tra xem mail có hợp lệ không
+        if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+          alert('Email Google không hợp lệ.');
+          return;
+        }
+
+        // 2. Xem thử mail đó đã có tài khoản trên hệ thống SchoolPick chưa
+        let allUsers = [];
+        try {
+          const raw = localStorage.getItem('schoolpick_users_v2');
+          if (raw) allUsers = JSON.parse(raw);
+        } catch (e) {}
+
+        const existing = Array.isArray(allUsers) ? allUsers.find(function(u) {
+          return u && u.email && u.email.toLowerCase().trim() === cleanEmail;
+        }) : null;
 
         const role = roleSelect.value || 'parent';
 
-        // Remember to device's list
+        if (!existing) {
+          // Chưa có tài khoản -> Không cho đăng nhập, chuyển sang hiển thị màn hình thông báo và tùy chọn Đăng ký
+          viewList.style.display = 'none';
+          viewCustom.style.display = 'none';
+          viewNotFound.style.display = 'flex';
+          notFoundEmailEl.textContent = cleanEmail;
+
+          pendingSignupProfile = {
+            name: name,
+            email: cleanEmail,
+            avatarUrl: avatarUrl,
+            role: role
+          };
+          return;
+        }
+
+        // 3. Đã có tài khoản -> Cho phép họ vào tài khoản của mình!
+        document.getElementById('progress-bar').style.display = 'block';
+
+        // Lưu vào danh sách tài khoản đã dùng trên thiết bị
         try {
           const raw = localStorage.getItem('schoolpick_saved_google_accounts');
           const list = raw ? JSON.parse(raw) : [];
           const updated = [
-            { name, email, avatarUrl, role, lastLogin: Date.now() },
-            ...list.filter(a => a.email.toLowerCase() !== email.toLowerCase())
+            { name: existing.name || name, email: cleanEmail, avatarUrl: existing.avatarUrl || avatarUrl, role: role, lastLogin: Date.now() },
+            ...list.filter(a => a.email.toLowerCase() !== cleanEmail)
           ].slice(0, 10);
           localStorage.setItem('schoolpick_saved_google_accounts', JSON.stringify(updated));
         } catch (e) {}
@@ -555,9 +661,9 @@
         const payload = {
           type: 'GOOGLE_SIGNIN_SUCCESS',
           user: {
-            name,
-            email,
-            avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=0284c7&textColor=ffffff`,
+            name: existing.name || name,
+            email: cleanEmail,
+            avatarUrl: existing.avatarUrl || avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=0284c7&textColor=ffffff`,
             role: role
           }
         };

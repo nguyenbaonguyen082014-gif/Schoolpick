@@ -1,13 +1,20 @@
 /**
- * Validation utilities for verifying real Gmail addresses and real Vietnamese phone numbers.
+ * Validation utilities for verifying real emails (Gmail, FPT Education, Edu.vn, Yahoo, Outlook, 
+ * company/school domains, and any legitimate email provider) while strictly rejecting fake/disposable emails.
+ * Also verifies real active Vietnamese mobile phone numbers.
  */
 
-export interface GmailValidationResult {
+export interface EmailValidationResult {
   isValid: boolean;
   reason?: string;
   cleanEmail?: string;
   username?: string;
+  domain?: string;
+  providerName?: string;
 }
+
+// Backward-compatibility alias
+export type GmailValidationResult = EmailValidationResult;
 
 export interface PhoneValidationResult {
   isValid: boolean;
@@ -67,8 +74,8 @@ const VIETNAM_CARRIERS: Record<string, string> = {
   '055': 'I-Telecom',
 };
 
-// Known fake / test / dummy patterns
-const FAKE_GMAIL_USERNAMES = new Set([
+// Known fake / dummy / spam usernames
+const FAKE_EMAIL_USERNAMES = new Set([
   'test',
   'tester',
   'testing',
@@ -85,9 +92,6 @@ const FAKE_GMAIL_USERNAMES = new Set([
   'demouser',
   'sample',
   'random',
-  'admin',
-  'administrator',
-  'user12',
   'tempmail',
   'disposable',
   'noname',
@@ -97,30 +101,172 @@ const FAKE_GMAIL_USERNAMES = new Set([
   'abcdef',
 ]);
 
+// Known disposable / burner / temporary mail domains (Mail ảo)
+const DISPOSABLE_DOMAINS = new Set([
+  'tempmail.com',
+  'tempmail.net',
+  'temp-mail.org',
+  'temp-mail.io',
+  '10minutemail.com',
+  '10minutemail.net',
+  '10mail.org',
+  '10minemail.com',
+  'mailinator.com',
+  'mailinator2.com',
+  'yopmail.com',
+  'yopmail.fr',
+  'yopmail.net',
+  'guerrillamail.com',
+  'guerrillamail.net',
+  'guerrillamail.biz',
+  'guerrillamail.org',
+  'guerrillamail.info',
+  'guerrillamailblock.com',
+  'trashmail.com',
+  'trashmail.net',
+  'trashmail.org',
+  'trashmail.me',
+  'trashmail.ws',
+  'trashmail.de',
+  'fakeinbox.com',
+  'getairmail.com',
+  'throwawaymail.com',
+  'dispostable.com',
+  'sharklasers.com',
+  'maildrop.cc',
+  'mohmal.com',
+  'crazymailing.com',
+  'burnermail.io',
+  'fakemailgenerator.com',
+  'mytemp.email',
+  'mytempemail.com',
+  'mytempmail.com',
+  'generator.email',
+  'emailondeck.com',
+  'nada.ltd',
+  'getnada.com',
+  'inboxkitten.com',
+  'inboxbear.com',
+  'tempail.com',
+  'dropmail.me',
+  'minutemail.com',
+  'fakemail.net',
+  'temporary-mail.net',
+  'temporarymail.com',
+  'temporarymail.net',
+  'tempemail.co',
+  'tempemail.net',
+  'tmailor.com',
+  'mailnesia.com',
+  'mailsac.com',
+  'harakirimail.com',
+  'armyspy.com',
+  'cuvox.de',
+  'dayrep.com',
+  'einrot.com',
+  'fleckens.hu',
+  'gustr.com',
+  'jourrapide.com',
+  'rhyta.com',
+  'superrito.com',
+  'teleworm.us',
+  'mytrashmail.com',
+  'binkmail.com',
+  'bobmail.info',
+  'chammy.info',
+  'devnullmail.com',
+  'letthemeatspam.com',
+  'mailin8r.com',
+  'notmailinator.com',
+  'reallymymail.com',
+  'reconmail.com',
+  'safetymail.info',
+  'sendspamhere.com',
+  'sogetthis.com',
+  'spambob.com',
+  'spambog.com',
+  'spambog.de',
+  'spamhereplease.com',
+  'spamherelots.com',
+  'spamthisplease.com',
+  'disposablemail.com',
+  'disposable.email',
+  'burnermail.com',
+  'spam4.me',
+  'pokemail.net',
+  'chacuo.net',
+  'bccto.me',
+  'mailcatch.com',
+  'meltmail.com',
+  'spambox.us',
+  'fake.com',
+  'test.com',
+  'example.com',
+  'asdf.com',
+  'domain.com',
+  'sample.com',
+  'invalid.com',
+]);
+
 /**
- * Validates that an email is a REAL, valid Gmail address according to Google's official standards:
- * - Domain must be @gmail.com or @googlemail.com
- * - Username must be 6 to 30 characters
- * - Only letters (a-z), numbers (0-9), and periods (.) allowed
- * - Cannot start or end with a period
- * - Cannot have consecutive periods (..)
- * - Rejects obvious fake/test patterns
+ * Checks if a domain is a known disposable or fake mail service
  */
-export function validateRealGmail(email: string): GmailValidationResult {
+function isDisposableDomain(domain: string): boolean {
+  if (DISPOSABLE_DOMAINS.has(domain)) return true;
+
+  // Pattern detection for disposable mail services
+  const disposableKeywords = [
+    'tempmail',
+    'temp-mail',
+    'disposable',
+    'throwaway',
+    'trashmail',
+    '10minut',
+    'fakemail',
+    'burnermail',
+    'guerrilla',
+    'mailinator',
+    'yopmail',
+    'sharklaser',
+    'maildrop',
+    'getnada',
+    'mohmal',
+    'emailondeck',
+    'dropmail',
+    'mailnesia',
+    'dispostable',
+    'minutemail',
+    'inboxkitten',
+    'inboxbear',
+    'mytemp',
+    'temporary',
+    'burner',
+  ];
+
+  return disposableKeywords.some(keyword => domain.includes(keyword));
+}
+
+/**
+ * Validates that an email is a REAL, authentic email address:
+ * - Accepts ANY legitimate email provider (FPT, Edu.vn, Gmail, Yahoo, Outlook, custom domains...)
+ * - STRICTLY REJECTS fake/disposable/temporary burner emails (Mail ảo)
+ * - Returns "Email không tồn tại." for any non-existent, fake, or disposable address
+ */
+export function validateRealEmail(email: string): EmailValidationResult {
   const trimmed = (email || '').trim().toLowerCase();
 
   if (!trimmed) {
     return {
       isValid: false,
-      reason: 'Vui lòng nhập địa chỉ Gmail của bạn.',
+      reason: 'Vui lòng nhập địa chỉ email.',
     };
   }
 
-  // Check if it has an @
+  // Must contain an '@'
   if (!trimmed.includes('@')) {
     return {
       isValid: false,
-      reason: 'Địa chỉ Gmail không tồn tại hoặc sai định dạng. Vui lòng nhập đầy đủ đuôi @gmail.com.',
+      reason: 'Email không tồn tại.',
     };
   }
 
@@ -128,79 +274,149 @@ export function validateRealGmail(email: string): GmailValidationResult {
   if (parts.length !== 2) {
     return {
       isValid: false,
-      reason: 'Địa chỉ email không hợp lệ.',
+      reason: 'Email không tồn tại.',
     };
   }
 
   const [username, domain] = parts;
 
-  // Strict domain check: MUST be gmail.com or googlemail.com
-  if (domain !== 'gmail.com' && domain !== 'googlemail.com') {
-    if (['yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com'].includes(domain)) {
+  // Username basic check
+  if (!username || username.length < 2) {
+    return {
+      isValid: false,
+      reason: 'Email không tồn tại.',
+    };
+  }
+
+  // Domain checks
+  if (!domain || !domain.includes('.')) {
+    return {
+      isValid: false,
+      reason: 'Email không tồn tại.',
+    };
+  }
+
+  // 1. REJECT DISPOSABLE / FAKE EMAILS (Tuyệt đối không cho dùng mail ảo)
+  if (isDisposableDomain(domain)) {
+    return {
+      isValid: false,
+      reason: 'Email không tồn tại.',
+    };
+  }
+
+  // Check top-level domain format
+  const domainSegments = domain.split('.');
+  const tld = domainSegments[domainSegments.length - 1];
+  if (!tld || tld.length < 2 || !/^[a-z]+$/.test(tld)) {
+    return {
+      isValid: false,
+      reason: 'Email không tồn tại.',
+    };
+  }
+
+  // General username syntax
+  if (!/^[a-z0-9._%+-]+$/.test(username)) {
+    return {
+      isValid: false,
+      reason: 'Email không tồn tại.',
+    };
+  }
+
+  if (username.startsWith('.') || username.endsWith('.') || username.includes('..')) {
+    return {
+      isValid: false,
+      reason: 'Email không tồn tại.',
+    };
+  }
+
+  // 2. PROVIDER IDENTIFICATION & PROVIDER-SPECIFIC RULES
+  let providerName = 'Email hợp lệ';
+
+  // 2.1 FPT Education (@fpt.edu.vn, @fe.edu.vn)
+  if (domain === 'fpt.edu.vn' || domain.endsWith('.fpt.edu.vn') || domain === 'fe.edu.vn') {
+    providerName = 'FPT Education (@fpt.edu.vn)';
+    if (username.length < 2) {
       return {
         isValid: false,
-        reason: `Hệ thống chỉ chấp nhận tài khoản Gmail thật (@gmail.com). Bạn đang nhập email từ @${domain}.`,
+        reason: 'Email không tồn tại.',
       };
     }
-    return {
-      isValid: false,
-      reason: 'Chỉ chấp nhận tài khoản Gmail thật kết thúc bằng @gmail.com.',
-    };
+  }
+  // 2.2 Edu.vn / Educational Domains (.edu.vn, .edu, .k12.vn)
+  else if (domain.endsWith('.edu.vn') || domain === 'edu.vn' || domain.endsWith('.edu') || domain.endsWith('.k12.vn')) {
+    providerName = domain.includes('edu.vn') ? 'Email Giáo dục (.edu.vn)' : 'Email Trường học (.edu)';
+    if (username.length < 2) {
+      return {
+        isValid: false,
+        reason: 'Email không tồn tại.',
+      };
+    }
+  }
+  // 2.3 Yahoo Mail
+  else if (domain === 'yahoo.com' || domain === 'yahoo.com.vn' || domain === 'ymail.com' || domain === 'myyahoo.com') {
+    providerName = domain.includes('.vn') ? 'Yahoo Mail Việt Nam' : 'Yahoo Mail';
+    if (username.length < 4 || username.length > 32 || !/^[a-z0-9._]+$/.test(username)) {
+      return {
+        isValid: false,
+        reason: 'Email không tồn tại.',
+      };
+    }
+  }
+  // 2.4 Google Gmail
+  else if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    providerName = 'Google Gmail';
+    if (username.length < 6 || username.length > 30 || !/^[a-z0-9.]+$/.test(username)) {
+      return {
+        isValid: false,
+        reason: 'Email không tồn tại.',
+      };
+    }
+  }
+  // 2.5 Microsoft (Outlook / Hotmail / Live)
+  else if (['outlook.com', 'outlook.com.vn', 'hotmail.com', 'live.com', 'msn.com'].includes(domain)) {
+    providerName = 'Microsoft Outlook';
+    if (username.length < 3) {
+      return {
+        isValid: false,
+        reason: 'Email không tồn tại.',
+      };
+    }
+  }
+  // 2.6 Apple iCloud
+  else if (['icloud.com', 'me.com'].includes(domain)) {
+    providerName = 'Apple iCloud';
+    if (username.length < 3) {
+      return {
+        isValid: false,
+        reason: 'Email không tồn tại.',
+      };
+    }
+  }
+  // 2.7 Proton / Zoho
+  else if (domain === 'proton.me' || domain === 'protonmail.com') {
+    providerName = 'Proton Mail';
+  } else if (domain === 'zoho.com') {
+    providerName = 'Zoho Mail';
+  }
+  // 2.8 All other legitimate domains
+  else {
+    providerName = `Email (@${domain})`;
   }
 
-  // Google's official rule: username must be 6 to 30 characters
-  if (username.length < 6) {
+  // Reject generic fake usernames (e.g. test, fake, asdf, qwerty)
+  const unstrippedName = username.replace(/[._\-]/g, '');
+  if (FAKE_EMAIL_USERNAMES.has(unstrippedName)) {
     return {
       isValid: false,
-      reason: 'Tên tài khoản Gmail không tồn tại. Theo quy chuẩn Google, tên Gmail phải có tối thiểu 6 ký tự.',
-    };
-  }
-
-  if (username.length > 30) {
-    return {
-      isValid: false,
-      reason: 'Tên tài khoản Gmail không hợp lệ. Theo quy chuẩn Google, tên Gmail tối đa 30 ký tự.',
-    };
-  }
-
-  // Characters allowed: letters (a-z), numbers (0-9), and dots (.)
-  if (!/^[a-z0-9.]+$/.test(username)) {
-    return {
-      isValid: false,
-      reason: 'Tên tài khoản Gmail chỉ được chứa chữ cái (a-z), chữ số (0-9) và dấu chấm (.).',
-    };
-  }
-
-  // Cannot start or end with a period
-  if (username.startsWith('.') || username.endsWith('.')) {
-    return {
-      isValid: false,
-      reason: 'Tên tài khoản Gmail không được bắt đầu hoặc kết thúc bằng dấu chấm (.).',
-    };
-  }
-
-  // Cannot have consecutive periods
-  if (username.includes('..')) {
-    return {
-      isValid: false,
-      reason: 'Tên tài khoản Gmail không được chứa hai dấu chấm liên tiếp (..).',
-    };
-  }
-
-  // Check known fake/test patterns
-  const unstrippedName = username.replace(/\./g, '');
-  if (FAKE_GMAIL_USERNAMES.has(unstrippedName)) {
-    return {
-      isValid: false,
-      reason: `Địa chỉ "${trimmed}" là tài khoản mẫu/ảo không có thật. Vui lòng sử dụng Gmail thật của bạn.`,
+      reason: 'Email không tồn tại.',
     };
   }
 
   // Check if all characters in username are the same (e.g., aaaaaa, 111111)
-  if (/^(.)\1+$/.test(unstrippedName)) {
+  if (/^(.)\1+$/.test(unstrippedName) && unstrippedName.length >= 4) {
     return {
       isValid: false,
-      reason: 'Địa chỉ Gmail này không có thực trên máy chủ Google. Vui lòng nhập địa chỉ Gmail thật của bạn.',
+      reason: 'Email không tồn tại.',
     };
   }
 
@@ -208,15 +424,24 @@ export function validateRealGmail(email: string): GmailValidationResult {
   if (['asdfghjkl', 'qwertyuiop', 'zxcvbnm'].some(k => unstrippedName.includes(k))) {
     return {
       isValid: false,
-      reason: 'Địa chỉ Gmail này có dấu hiệu không có thực. Vui lòng nhập Gmail thật đang hoạt động.',
+      reason: 'Email không tồn tại.',
     };
   }
 
   return {
     isValid: true,
-    cleanEmail: `${username}@gmail.com`,
+    cleanEmail: `${username}@${domain}`,
     username,
+    domain,
+    providerName,
   };
+}
+
+/**
+ * Backward compatibility alias for validateRealEmail
+ */
+export function validateRealGmail(email: string): EmailValidationResult {
+  return validateRealEmail(email);
 }
 
 /**

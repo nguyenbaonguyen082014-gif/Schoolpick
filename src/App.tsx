@@ -73,23 +73,25 @@ const AppContent: React.FC = () => {
         </main>
       </div>
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-5 text-slate-500 text-xs text-center">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center space-x-2 font-bold text-slate-700">
-            <Car className="w-4 h-4 text-blue-600" />
-            <span>SchoolPick – Hệ thống đón học sinh thông minh</span>
-          </div>
+      {/* Footer - hidden on auth screen to guarantee 1-screen viewport fit */}
+      {!(!currentUser && unauthScreen === 'auth') && (
+        <footer className="bg-white border-t border-slate-200 py-3 sm:py-4 text-slate-500 text-xs text-center">
+          <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center space-x-2 font-bold text-slate-700">
+              <Car className="w-4 h-4 text-blue-600" />
+              <span>SchoolPick – Hệ thống đón học sinh thông minh</span>
+            </div>
 
-          <div className="flex items-center space-x-4 text-slate-500 text-[11px]">
-            <span>Hotline: 1900 6868</span>
-            <span>•</span>
-            <span>Bảo mật dữ liệu học sinh & phụ huynh</span>
-            <span>•</span>
-            <span className="text-emerald-600 font-semibold">Demo trực tuyến V2</span>
+            <div className="flex items-center space-x-4 text-slate-500 text-[11px]">
+              <span>Hotline: 1900 6868</span>
+              <span>•</span>
+              <span>Bảo mật dữ liệu học sinh & phụ huynh</span>
+              <span>•</span>
+              <span className="text-emerald-600 font-semibold">Demo trực tuyến V2</span>
+            </div>
           </div>
-        </div>
-      </footer>
+        </footer>
+      )}
 
       {/* Global Toast Notifications & Confirmation Dialogs */}
       <ToastContainer />

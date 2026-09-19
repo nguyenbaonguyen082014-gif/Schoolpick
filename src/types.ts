@@ -66,8 +66,16 @@ export interface User {
 
 export interface LoginResult {
   success: boolean;
-  reason?: 'NOT_FOUND' | 'WRONG_PASSWORD' | 'EMPTY_FIELDS';
+  reason?: 'NOT_FOUND' | 'WRONG_PASSWORD' | 'EMPTY_FIELDS' | 'INVALID_EMAIL' | 'NO_ACCOUNT';
   message?: string;
+  email?: string;
+  user?: User;
+  googleProfile?: {
+    name: string;
+    email: string;
+    avatarUrl?: string;
+    role?: UserRole;
+  };
 }
 
 export interface RegisterResult {

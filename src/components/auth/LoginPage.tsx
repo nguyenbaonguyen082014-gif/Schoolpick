@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { useSchoolPick } from '../../context/SchoolPickContext';
 import { UserRole } from '../../types';
-import { validateRealGmail, validateRealPhoneNumber } from '../../utils/validators';
+import { validateRealEmail, validateRealPhoneNumber } from '../../utils/validators';
 
 // Helper to generate Google-style secure password
 const generateGoogleSecurePassword = () => {
@@ -89,6 +89,8 @@ export const LoginPage: React.FC = () => {
     checkUserExists,
     googleStrictOnly,
     setGoogleStrictOnly,
+    clearAllAccounts,
+    users,
   } = useSchoolPick();
 
   const [selectedRole, setSelectedRole] = useState<UserRole>(UserRole.PARENT);
@@ -110,11 +112,18 @@ export const LoginPage: React.FC = () => {
   const [signupClassName, setSignupClassName] = useState('7A1');
   const [signupErrorMessage, setSignupErrorMessage] = useState('');
 
-  // Password choice for signup - default to custom password so user sets it themselves
+  // Password choice for signup - Google strong password modal window (shows once automatically)
   const [useGooglePasswordOption, setUseGooglePasswordOption] = useState<boolean>(false);
+  const [googlePasswordModalOpen, setGooglePasswordModalOpen] = useState<boolean>(false);
+  const [hasShownGooglePasswordPrompt, setHasShownGooglePasswordPrompt] = useState<boolean>(false);
   const [googleGeneratedPassword, setGoogleGeneratedPassword] = useState<string>(() => generateGoogleSecurePassword());
   const [copiedGooglePassword, setCopiedGooglePassword] = useState<boolean>(false);
   const [showSignupPassword, setShowSignupPassword] = useState<boolean>(false);
+
+  const closeGooglePasswordModal = () => {
+    setHasShownGooglePasswordPrompt(true);
+    setGooglePasswordModalOpen(false);
+  };
 
   const handleSignupSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,20 +134,18 @@ export const LoginPage: React.FC = () => {
       return;
     }
 
-    // 1. Strict validation: Only real Gmail (@gmail.com) is allowed
-    const gmailRes = validateRealGmail(signupEmail);
-    if (!gmailRes.isValid) {
-      setSignupErrorMessage(
-        gmailRes.reason || 'Địa chỉ Gmail không tồn tại hoặc không hợp lệ. Chỉ chấp nhận Gmail thật (@gmail.com).'
-      );
+    // 1. Strict validation: Real email address (FPT, Edu.vn, Gmail, Yahoo, Outlook, etc.)
+    const emailRes = validateRealEmail(signupEmail);
+    if (!emailRes.isValid) {
+      setSignupErrorMessage(emailRes.reason || 'Email không tồn tại.');
       return;
     }
 
-    // Check if account already exists with this Gmail
-    const existing = checkUserExists(gmailRes.cleanEmail || signupEmail);
+    // Check if account already exists with this Email
+    const existing = checkUserExists(emailRes.cleanEmail || signupEmail);
     if (existing) {
       setSignupErrorMessage(
-        `Tài khoản Gmail "${gmailRes.cleanEmail || signupEmail}" đã được đăng ký bởi ${existing.name}. Bạn có muốn chuyển sang Đăng nhập không?`
+        `Tài khoản Email "${emailRes.cleanEmail || signupEmail}" đã được đăng ký bởi ${existing.name}. Bạn có muốn chuyển sang Đăng nhập không?`
       );
       return;
     }
@@ -166,7 +173,7 @@ export const LoginPage: React.FC = () => {
 
     const regResult = registerUser({
       name: signupName.trim(),
-      email: gmailRes.cleanEmail || signupEmail.trim(),
+      email: emailRes.cleanEmail || signupEmail.trim(),
       role: signupRole,
       phone: phoneRes.formattedPhone || signupPhone.trim(),
       studentName: signupRole === UserRole.PARENT ? signupStudentName.trim() : undefined,
@@ -274,12 +281,25 @@ interface SavedGoogleAccount {
               });
               const profile = await res.json();
               setGoogleModalOpen(false);
-              loginWithGoogle({
+              const loginRes = loginWithGoogle({
                 name: profile.name || profile.email.split('@')[0],
                 email: profile.email,
                 avatarUrl: profile.picture,
                 role: anyGoogleRole || selectedRole,
               });
+              if (!loginRes.success) {
+                if (loginRes.reason === 'NOT_FOUND') {
+                  setErrorMessage(`Tài khoản Google (${profile.email}) chưa được đăng ký trên hệ thống SchoolPick. Vui lòng đăng ký tài khoản trước.`);
+                  setAccountNotFoundEmail(profile.email);
+                  setSignupEmail(profile.email);
+                  if (profile.name) setSignupName(profile.name);
+                  if (anyGoogleRole || selectedRole) setSignupRole(anyGoogleRole || selectedRole);
+                } else if (loginRes.reason === 'INVALID_EMAIL') {
+                  setErrorMessage(loginRes.message || `Email ${profile.email} không tồn tại hoặc không hợp lệ.`);
+                } else {
+                  setErrorMessage(loginRes.message || 'Không thể đăng nhập Google.');
+                }
+              }
             } catch {
               setGoogleOAuthError('Không thể lấy thông tin hồ sơ từ Google.');
             }
@@ -327,14 +347,38 @@ interface SavedGoogleAccount {
     const handleAuthMessage = (event: MessageEvent) => {
       if (event.data?.type === 'GOOGLE_SIGNIN_SUCCESS' && event.data?.user) {
         const { name, email, avatarUrl, role } = event.data.user;
-        loginWithGoogle({
+        const loginRes = loginWithGoogle({
           name,
           email,
           avatarUrl,
           role: role || selectedRole,
         });
+        if (!loginRes.success) {
+          if (loginRes.reason === 'NOT_FOUND') {
+            setErrorMessage(`Tài khoản Google (${email}) chưa được đăng ký trên hệ thống SchoolPick. Vui lòng đăng ký tài khoản trước.`);
+            setAccountNotFoundEmail(email);
+            setSignupEmail(email);
+            if (name) setSignupName(name);
+            if (role) setSignupRole(role);
+          } else if (loginRes.reason === 'INVALID_EMAIL') {
+            setErrorMessage(loginRes.message || `Email ${email} không tồn tại hoặc không hợp lệ.`);
+          } else {
+            setErrorMessage(loginRes.message || 'Không thể đăng nhập Google.');
+          }
+        }
         setGoogleModalOpen(false);
         setPopupBlocked(false);
+      } else if (event.data?.type === 'GOOGLE_SIGNUP_PREFILL' && event.data?.user) {
+        const { name, email, role } = event.data.user;
+        setAuthMode('signup');
+        setSignupEmail(email);
+        if (name) setSignupName(name);
+        if (role) setSignupRole(role);
+        setErrorMessage('');
+        setAccountNotFoundEmail(null);
+        setGoogleModalOpen(false);
+        setPopupBlocked(false);
+        addToast(`Đã nhận thông tin từ Google: ${email}. Vui lòng nhập số điện thoại để hoàn tất đăng ký!`, 'info');
       }
     };
 
@@ -344,12 +388,25 @@ interface SavedGoogleAccount {
         if (stored) {
           localStorage.removeItem('schoolpick_direct_google_auth');
           const user = JSON.parse(stored);
-          loginWithGoogle({
+          const loginRes = loginWithGoogle({
             name: user.name,
             email: user.email,
             avatarUrl: user.avatarUrl,
             role: user.role || selectedRole,
           });
+          if (!loginRes.success) {
+            if (loginRes.reason === 'NOT_FOUND') {
+              setErrorMessage(`Tài khoản Google (${user.email}) chưa được đăng ký trên hệ thống SchoolPick. Vui lòng đăng ký tài khoản trước.`);
+              setAccountNotFoundEmail(user.email);
+              setSignupEmail(user.email);
+              if (user.name) setSignupName(user.name);
+              if (user.role) setSignupRole(user.role);
+            } else if (loginRes.reason === 'INVALID_EMAIL') {
+              setErrorMessage(loginRes.message || `Email ${user.email} không tồn tại hoặc không hợp lệ.`);
+            } else {
+              setErrorMessage(loginRes.message || 'Lỗi đăng nhập Google.');
+            }
+          }
           setGoogleModalOpen(false);
         }
       } catch {}
@@ -385,11 +442,38 @@ interface SavedGoogleAccount {
     roleToUse?: UserRole
   ) => {
     const effectiveRole = roleToUse || anyGoogleRole || selectedRole;
+    const cleanEmail = targetEmail.trim().toLowerCase();
+
+    // 1. Kiểm tra xem mail có tồn tại / hợp lệ không
+    const emailRes = validateRealEmail(cleanEmail);
+    if (!emailRes.isValid) {
+      const msg = emailRes.reason || 'Email không tồn tại hoặc không hợp lệ.';
+      setErrorMessage(msg);
+      setInputEmailError(msg);
+      addToast(msg, 'error');
+      return;
+    }
+
+    // 2. Kiểm tra xem mail đó đã có tài khoản trên hệ thống chưa
+    const existing = checkUserExists(cleanEmail);
+    if (!existing) {
+      const notFoundMsg = `Tài khoản Google (${cleanEmail}) chưa được đăng ký trên hệ thống SchoolPick. Vui lòng đăng ký tài khoản trước.`;
+      setErrorMessage(notFoundMsg);
+      setAccountNotFoundEmail(cleanEmail);
+      setSignupEmail(cleanEmail);
+      if (targetName) setSignupName(targetName);
+      setSignupRole(effectiveRole);
+      setGoogleModalOpen(false);
+      return;
+    }
+
+    // 3. Sau khi xác nhận đã có tài khoản -> Cho phép vào tài khoản của mình!
     setGoogleLoading(true);
     const effectiveAvatar =
       avatar ||
+      existing.avatarUrl ||
       `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
-        targetName
+        existing.name || targetName
       )}&backgroundColor=0284c7&textColor=ffffff`;
 
     setTimeout(() => {
@@ -400,24 +484,28 @@ interface SavedGoogleAccount {
       try {
         const updated = [
           {
-            name: targetName,
-            email: targetEmail,
+            name: existing.name || targetName,
+            email: cleanEmail,
             avatarUrl: effectiveAvatar,
             role: effectiveRole,
             lastLogin: Date.now(),
           },
-          ...savedGoogleAccounts.filter(a => a.email.toLowerCase() !== targetEmail.toLowerCase()),
+          ...savedGoogleAccounts.filter(a => a.email.toLowerCase() !== cleanEmail),
         ].slice(0, 8);
         setSavedGoogleAccounts(updated);
         localStorage.setItem('schoolpick_saved_google_accounts', JSON.stringify(updated));
       } catch {}
 
-      loginWithGoogle({
-        name: targetName,
-        email: targetEmail,
+      const loginRes = loginWithGoogle({
+        name: existing.name || targetName,
+        email: cleanEmail,
         avatarUrl: effectiveAvatar,
         role: effectiveRole,
       });
+
+      if (!loginRes.success) {
+        setErrorMessage(loginRes.message || 'Không thể đăng nhập Google.');
+      }
     }, 280);
   };
 
@@ -428,13 +516,36 @@ interface SavedGoogleAccount {
       setInputEmailError('Vui lòng nhập địa chỉ Gmail hoặc email Google của bạn.');
       return;
     }
-    if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
-      setInputEmailError('Địa chỉ email không hợp lệ (ví dụ: nguyenvanan@gmail.com).');
+
+    // 1. Kiểm tra xem email có tồn tại / hợp lệ hay không
+    const emailRes = validateRealEmail(cleanEmail);
+    if (!emailRes.isValid) {
+      setInputEmailError(emailRes.reason || 'Email không tồn tại hoặc không hợp lệ.');
+      return;
+    }
+
+    // 2. Xem thử email đó đã có tài khoản chưa
+    const existing = checkUserExists(cleanEmail);
+    if (!existing) {
+      setInputEmailError(`Email "${cleanEmail}" chưa có tài khoản trên hệ thống SchoolPick. Vui lòng tạo tài khoản mới trước khi đăng nhập.`);
+      setErrorMessage(`Tài khoản Google (${cleanEmail}) chưa được đăng ký trên hệ thống. Vui lòng tạo tài khoản mới trước khi đăng nhập.`);
+      setAccountNotFoundEmail(cleanEmail);
+      setSignupEmail(cleanEmail);
+      let cleanName = anyGoogleName.trim();
+      if (!cleanName) {
+        const part = cleanEmail.split('@')[0];
+        cleanName = part
+          .split(/[._-]/)
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+      }
+      setSignupName(cleanName);
+      setSignupRole(anyGoogleRole || selectedRole);
       return;
     }
 
     setInputEmailError('');
-    let cleanName = anyGoogleName.trim();
+    let cleanName = anyGoogleName.trim() || existing.name;
     if (!cleanName) {
       const part = cleanEmail.split('@')[0];
       cleanName = part
@@ -443,7 +554,7 @@ interface SavedGoogleAccount {
         .join(' ');
     }
 
-    const avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
+    const avatar = existing.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
       cleanName
     )}&backgroundColor=0284c7&textColor=ffffff`;
 
@@ -502,638 +613,619 @@ interface SavedGoogleAccount {
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 bg-gradient-to-b from-slate-50 via-blue-50/30 to-slate-100">
+    <div className="min-h-[calc(100vh-4.5rem)] flex flex-col items-center justify-center py-2.5 px-3 sm:px-6 bg-gradient-to-b from-slate-50 via-blue-50/30 to-slate-100">
       {/* Top Navigation Bar: Back to Home */}
-      <div className="w-full max-w-4xl mb-4 flex items-center justify-between">
+      <div className="w-full max-w-4xl mb-2 flex items-center justify-between">
         <button
           type="button"
           id="btn-login-back-home"
           onClick={goToHome}
-          className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:text-blue-600 hover:border-blue-300 font-bold text-xs shadow-2xs transition-all cursor-pointer group"
+          className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:text-blue-600 hover:border-blue-300 font-bold text-xs shadow-2xs transition-all cursor-pointer group"
         >
-          <ArrowLeft className="w-4 h-4 text-slate-500 group-hover:-translate-x-0.5 transition-transform" />
+          <ArrowLeft className="w-3.5 h-3.5 text-slate-500 group-hover:-translate-x-0.5 transition-transform" />
           <span>Quay lại màn hình chính</span>
         </button>
 
-        <span className="text-xs text-slate-500 font-medium hidden sm:inline">
-          {authMode === 'login' ? 'Đang ở chế độ Đăng nhập' : 'Đang ở chế độ Đăng ký mới'}
+        <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
+          {authMode === 'login' ? 'Chế độ Đăng nhập' : 'Chế độ Đăng ký mới'}
         </span>
       </div>
 
-      <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+      <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">
         {/* Left Side: Brand Value Prop & Features */}
-        <div className="lg:col-span-5 space-y-6 text-left">
-          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-bold">
-            <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-            <span>Hệ thống quản lý đón học sinh thông minh</span>
+        <div className="lg:col-span-5 space-y-3 text-left hidden lg:block">
+          <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold">
+            <Sparkles className="w-3 h-3 text-blue-600" />
+            <span>Đón học sinh thông minh</span>
           </div>
 
           <div>
-            <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight leading-tight">
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-tight">
               School<span className="text-blue-600">Pick</span>
             </h1>
-            <p className="mt-2 text-base sm:text-lg font-bold text-slate-700">
+            <p className="mt-1 text-xs sm:text-sm font-bold text-slate-700">
               Đón con thông minh – Giảm ùn tắc – An toàn hơn
             </p>
-            <p className="mt-3 text-xs sm:text-sm text-slate-500 leading-relaxed">
-              Giải pháp kết nối tức thời giữa phụ huynh và giáo viên chủ nhiệm. Thông báo đón con theo thời gian thực, điều phối phân làn khu vực thông minh và hạn chế ùn tắc cổng trường.
+            <p className="mt-1.5 text-xs text-slate-500 leading-relaxed line-clamp-3">
+              Kết nối tức thời phụ huynh và giáo viên. Báo đến trước, phân làn đón khoa học và chuông thông báo điều phối lớp học tức thì.
             </p>
           </div>
 
-          <div className="space-y-3 pt-2">
-            <div className="flex items-start space-x-3 p-3 rounded-xl bg-white border border-slate-200/80 shadow-xs">
-              <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-4 h-4" />
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center space-x-2.5 p-2 rounded-xl bg-white border border-slate-200/80 shadow-xs text-xs text-slate-700 font-semibold">
+              <div className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-3.5 h-3.5" />
               </div>
-              <div>
-                <p className="text-xs font-bold text-slate-800">Thao tác 10 giây cho phụ huynh</p>
-                <p className="text-[11px] text-slate-500">Báo đang đến chỉ với 1 chạm, theo dõi tiến độ chuẩn bị của con.</p>
-              </div>
+              <span>Thao tác 1 chạm cho phụ huynh</span>
             </div>
 
-            <div className="flex items-start space-x-3 p-3 rounded-xl bg-white border border-slate-200/80 shadow-xs">
-              <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-4 h-4" />
+            <div className="flex items-center space-x-2.5 p-2 rounded-xl bg-white border border-slate-200/80 shadow-xs text-xs text-slate-700 font-semibold">
+              <div className="w-6 h-6 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-3.5 h-3.5" />
               </div>
-              <div>
-                <p className="text-xs font-bold text-slate-800">Màn hình điều phối lớp học</p>
-                <p className="text-[11px] text-slate-500">Giáo viên nhận chuông thông báo tức thì, gọi đúng học sinh ra đúng làn.</p>
-              </div>
+              <span>Màn hình điều phối lớp học tức thì</span>
             </div>
           </div>
         </div>
 
         {/* Right Side: Auth Box (Login & Sign Up) */}
-        <div id="auth-card-top" className="lg:col-span-7 bg-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200 scroll-mt-24">
+        <div id="auth-card-top" className="lg:col-span-7 bg-white rounded-2xl p-4 sm:p-5 shadow-xl border border-slate-200 scroll-mt-24">
           {/* Top Mode Switcher Tabs: Login vs Sign Up */}
-          <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-            <div className="flex items-center space-x-1 p-1 bg-slate-100 rounded-2xl border border-slate-200/60">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 mb-3">
+            <div className="flex items-center space-x-1 p-1 bg-slate-100 rounded-xl border border-slate-200/60">
               <button
                 type="button"
                 id="tab-auth-login"
                 onClick={() => setAuthMode('login')}
-                className={`px-4 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center space-x-1.5 ${
+                className={`px-3 py-1 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center space-x-1.5 ${
                   authMode === 'login'
                     ? 'bg-white text-blue-700 shadow-xs ring-1 ring-slate-200/80'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <LogIn className="w-3.5 h-3.5" />
+                <LogIn className="w-3 h-3" />
                 <span>Đăng nhập</span>
               </button>
               <button
                 type="button"
                 id="tab-auth-signup"
                 onClick={() => setAuthMode('signup')}
-                className={`px-4 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center space-x-1.5 ${
+                className={`px-3 py-1 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center space-x-1.5 ${
                   authMode === 'signup'
                     ? 'bg-white text-blue-700 shadow-xs ring-1 ring-slate-200/80'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <UserPlus className="w-3.5 h-3.5" />
+                <UserPlus className="w-3 h-3" />
                 <span>Đăng ký mới</span>
               </button>
             </div>
 
-            <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
-              {authMode === 'login' ? 'Truy cập tài khoản trường' : 'Tạo tài khoản phụ huynh / GV'}
-            </span>
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={() => {
+                  clearAllAccounts();
+                  setSignupName('');
+                  setSignupEmail('');
+                  setSignupPhone('');
+                  setSignupPassword('');
+                  setSignupStudentName('');
+                  setEmail('');
+                  setPassword('');
+                }}
+                className="text-[11px] text-slate-500 hover:text-rose-600 font-semibold flex items-center space-x-1 px-2 py-1 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                title="Xóa tất cả tài khoản hiện tại để tạo mới"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-rose-600" />
+                <span>Xóa tất cả tài khoản</span>
+              </button>
+            </div>
           </div>
 
           {authMode === 'login' ? (
             <div>
-              <div className="mb-6">
-                <h2 className="text-xl font-black text-slate-900">Chọn vai trò đăng nhập</h2>
-                <p className="text-xs text-slate-500 mt-1">Chọn đối tượng phù hợp để trải nghiệm hệ thống</p>
+              {/* Role Selection & Admin Option */}
+              <div className="flex items-center justify-between mb-1.5">
+                <h2 className="text-xs font-black text-slate-900">Chọn vai trò của bạn:</h2>
+                <button
+                  type="button"
+                  id="role-select-admin"
+                  onClick={() => handleRoleSelect(UserRole.ADMIN)}
+                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-lg transition-colors cursor-pointer flex items-center space-x-1 ${
+                    selectedRole === UserRole.ADMIN
+                      ? 'bg-slate-800 text-white'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>Quản trị viên (BGH)</span>
+                </button>
               </div>
 
-          {/* Two Large Role Cards (Plus Admin tab) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-            {/* Parent Card */}
-            <button
-              type="button"
-              id="role-select-parent"
-              onClick={() => handleRoleSelect(UserRole.PARENT)}
-              className={`p-4 rounded-2xl text-left border-2 transition-all cursor-pointer ${
-                selectedRole === UserRole.PARENT
-                  ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-500/20'
-                  : 'border-slate-200 hover:border-slate-300 bg-white'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
-                  <Users className="w-5 h-5" />
-                </div>
-                {selectedRole === UserRole.PARENT && (
-                  <span className="w-2 h-2 rounded-full bg-blue-600"></span>
-                )}
+              {/* Two Compact Role Buttons */}
+              <div className="grid grid-cols-2 gap-2 mb-2.5">
+                {/* Parent Card */}
+                <button
+                  type="button"
+                  id="role-select-parent"
+                  onClick={() => handleRoleSelect(UserRole.PARENT)}
+                  className={`p-2 rounded-xl text-left border transition-all cursor-pointer flex items-center space-x-2.5 ${
+                    selectedRole === UserRole.PARENT
+                      ? 'border-blue-600 bg-blue-50/70 font-bold ring-1 ring-blue-500/20'
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-black text-slate-900 leading-none">👨‍👩‍👧 Phụ huynh</h3>
+                    <p className="text-[10px] text-slate-500 mt-0.5 truncate">Quản lý đón con</p>
+                  </div>
+                </button>
+
+                {/* Teacher Card */}
+                <button
+                  type="button"
+                  id="role-select-teacher"
+                  onClick={() => handleRoleSelect(UserRole.TEACHER)}
+                  className={`p-2 rounded-xl text-left border transition-all cursor-pointer flex items-center space-x-2.5 ${
+                    selectedRole === UserRole.TEACHER
+                      ? 'border-emerald-600 bg-emerald-50/70 font-bold ring-1 ring-emerald-500/20'
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                    <GraduationCap className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-black text-slate-900 leading-none">👩‍🏫 Giáo viên</h3>
+                    <p className="text-[10px] text-slate-500 mt-0.5 truncate">Điều phối học sinh</p>
+                  </div>
+                </button>
               </div>
-              <h3 className="text-sm font-black text-slate-900">👨‍👩‍👧 Phụ huynh</h3>
-              <p className="text-xs text-slate-500 mt-1">Quản lý việc đón con</p>
-            </button>
 
-            {/* Teacher Card */}
-            <button
-              type="button"
-              id="role-select-teacher"
-              onClick={() => handleRoleSelect(UserRole.TEACHER)}
-              className={`p-4 rounded-2xl text-left border-2 transition-all cursor-pointer ${
-                selectedRole === UserRole.TEACHER
-                  ? 'border-emerald-600 bg-emerald-50/60 ring-2 ring-emerald-500/20'
-                  : 'border-slate-200 hover:border-slate-300 bg-white'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                  <GraduationCap className="w-5 h-5" />
-                </div>
-                {selectedRole === UserRole.TEACHER && (
-                  <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
-                )}
-              </div>
-              <h3 className="text-sm font-black text-slate-900">👩‍🏫 Giáo viên</h3>
-              <p className="text-xs text-slate-500 mt-1">Quản lý việc đón học sinh</p>
-            </button>
-          </div>
-
-          {/* Quick Admin Option */}
-          <div className="flex items-center justify-between px-3 py-2 mb-6 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-            <span className="text-slate-600 font-medium flex items-center space-x-1.5">
-              <ShieldCheck className="w-4 h-4 text-slate-500" />
-              <span>Dành cho Ban Giám Hiệu / Quản trị viên:</span>
-            </span>
-            <button
-              type="button"
-              id="role-select-admin"
-              onClick={() => handleRoleSelect(UserRole.ADMIN)}
-              className={`px-3 py-1 rounded-lg font-bold transition-all ${
-                selectedRole === UserRole.ADMIN
-                  ? 'bg-slate-800 text-white'
-                  : 'text-blue-600 hover:bg-blue-50'
-              }`}
-            >
-              Đăng nhập Quản trị
-            </button>
-          </div>
-
-          {/* Primary Google Sign-In Button */}
-          <div className="mb-5">
-            <button
-              type="button"
-              id="btn-login-google"
-              onClick={handleGoogleClick}
-              disabled={googleLoading}
-              className="w-full py-4 px-5 rounded-2xl bg-white hover:bg-slate-50 border-2 border-blue-500/80 ring-4 ring-blue-500/15 text-slate-800 font-black text-sm sm:text-base flex items-center justify-center space-x-3 shadow-md hover:shadow-lg transition-all active:scale-[0.99] cursor-pointer disabled:opacity-70 group"
-            >
-              {googleLoading ? (
-                <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-              ) : (
-                <GoogleIcon className="w-5 h-5" />
-              )}
-              <span className="flex items-center space-x-2">
-                <span>
-                  {googleLoading
-                    ? 'Đang kết nối Google an toàn...'
-                    : `Đăng nhập bằng Google (${
-                        selectedRole === UserRole.PARENT
-                          ? 'Phụ huynh'
-                          : selectedRole === UserRole.TEACHER
-                          ? 'Giáo viên'
-                          : 'Ban giám hiệu'
-                      })`}
-                </span>
-                <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600 transition-colors" />
-              </span>
-            </button>
-            <p className="text-center text-[11px] text-slate-500 mt-2 flex items-center justify-center space-x-1.5 font-medium">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Xác thực tiện lợi & bảo mật thông tin với tài khoản của bạn</span>
-            </p>
-          </div>
-
-          {/* Divider between Google and Email/Password Login */}
-          <div className="relative my-5">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-200"></div>
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="px-3 bg-white text-slate-500 font-bold uppercase tracking-wider text-[10px]">
-                Hoặc đăng nhập bằng Email & Mật khẩu
-              </span>
-            </div>
-          </div>
-
-          {/* Email and Password Login Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {errorMessage && (
-              <div className={`p-3.5 rounded-2xl border text-xs font-medium space-y-2.5 ${
-                accountNotFoundEmail
-                  ? 'bg-amber-50/90 border-amber-200 text-amber-950'
-                  : 'bg-red-50 border-red-200 text-red-700'
-              }`}>
-                <div className="flex items-start space-x-2">
-                  <ShieldAlert className={`w-4 h-4 shrink-0 mt-0.5 ${
-                    accountNotFoundEmail ? 'text-amber-600' : 'text-red-600'
-                  }`} />
-                  <div className="flex-1 font-semibold leading-relaxed">{errorMessage}</div>
-                </div>
-
-                {accountNotFoundEmail && (
-                  <div className="pt-2.5 border-t border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                    <span className="text-[11px] text-amber-800">
-                      Tài khoản <b>{accountNotFoundEmail}</b> chưa được tạo trên hệ thống.
-                    </span>
+              {/* Error & Account Not Found Banner */}
+              {errorMessage && (
+                <div
+                  className={`mb-2.5 p-2.5 rounded-xl border text-xs font-medium space-y-1.5 animate-in fade-in slide-in-from-top-1 ${
+                    accountNotFoundEmail
+                      ? 'bg-amber-50 border-amber-300 text-amber-950 shadow-2xs'
+                      : 'bg-red-50 border-red-200 text-red-700'
+                  }`}
+                >
+                  <div className="flex items-start space-x-2">
+                    <ShieldAlert
+                      className={`w-4 h-4 shrink-0 mt-0.5 ${
+                        accountNotFoundEmail ? 'text-amber-600' : 'text-red-600'
+                      }`}
+                    />
+                    <div className="flex-1 text-[11px] font-semibold leading-snug">{errorMessage}</div>
                     <button
                       type="button"
-                      id="btn-create-account-prompt"
                       onClick={() => {
-                        setSignupEmail(accountNotFoundEmail);
-                        setSignupRole(selectedRole);
-                        setAuthMode('signup');
                         setErrorMessage('');
                         setAccountNotFoundEmail(null);
                       }}
-                      className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs shadow-xs transition-all active:scale-95 cursor-pointer inline-flex items-center justify-center space-x-1"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
                     >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span>Tạo tài khoản mới ngay</span>
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                )}
-              </div>
-            )}
 
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label htmlFor="input-login-email" className="block text-xs font-bold text-slate-700">
-                  Địa chỉ Email tài khoản <span className="text-red-500">*</span>
-                </label>
-                <span className="text-[11px] text-slate-500">
-                  Hệ thống sẽ kiểm tra email tồn tại và cho bạn vào ngay
-                </span>
-              </div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                  <Mail className="w-4 h-4" />
-                </div>
-                <input
-                  id="input-login-email"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={e => {
-                    setEmail(e.target.value);
-                    if (errorMessage) setErrorMessage('');
-                    if (accountNotFoundEmail) setAccountNotFoundEmail(null);
-                  }}
-                  placeholder="Nhập email tài khoản của bạn"
-                  className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                />
-              </div>
-
-              {/* Real-time Email Existence Feedback */}
-              {(() => {
-                const clean = email.trim().toLowerCase();
-                if (!clean) return null;
-                const found = checkUserExists(clean);
-                if (found) {
-                  return (
-                    <div className="flex items-center space-x-2 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3.5 py-2 rounded-xl animate-in fade-in duration-150">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>
-                        Tài khoản tồn tại: <b>{found.name}</b> ({found.role === UserRole.PARENT ? 'Phụ huynh' : found.role === UserRole.TEACHER ? 'Giáo viên' : 'Quản trị viên'}) - Bấm Đăng nhập để vào ngay!
+                  {accountNotFoundEmail && (
+                    <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-amber-800 truncate">
+                        Chưa có tài khoản <b>{accountNotFoundEmail}</b>
                       </span>
-                    </div>
-                  );
-                } else if (clean.includes('@') && clean.includes('.')) {
-                  return (
-                    <div className="flex items-center justify-between text-xs text-amber-900 bg-amber-50 border border-amber-200 px-3.5 py-2 rounded-xl animate-in fade-in duration-150">
-                      <div className="flex items-center space-x-1.5">
-                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>Chưa có tài khoản này trên hệ thống.</span>
-                      </div>
                       <button
                         type="button"
-                        id="btn-inline-quick-signup"
+                        id="btn-create-account-prompt"
                         onClick={() => {
-                          setSignupEmail(clean);
+                          setSignupEmail(accountNotFoundEmail);
                           setSignupRole(selectedRole);
                           setAuthMode('signup');
+                          setErrorMessage('');
+                          setAccountNotFoundEmail(null);
                         }}
-                        className="font-black text-blue-600 hover:underline cursor-pointer text-xs"
+                        className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-black text-[11px] shadow-xs cursor-pointer inline-flex items-center space-x-1 shrink-0"
                       >
-                        Tạo tài khoản mới ngay &rarr;
+                        <UserPlus className="w-3 h-3" />
+                        <span>Tạo tài khoản ngay</span>
                       </button>
                     </div>
-                  );
-                }
-                return null;
-              })()}
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label htmlFor="input-login-password" className="block text-xs font-bold text-slate-700">
-                  Mật khẩu tài khoản <span className="text-slate-400 font-normal text-[11px]">(Tùy chọn khi đăng nhập qua Email)</span>
-                </label>
-                <button
-                  type="button"
-                  id="btn-forgot-password"
-                  onClick={() => setForgotModalOpen(true)}
-                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
-                >
-                  Quên mật khẩu?
-                </button>
-              </div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                  <Lock className="w-4 h-4" />
-                </div>
-                <input
-                  id="input-login-password"
-                  type={showLoginPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="Nhập mật khẩu (hoặc để trống nếu đăng nhập nhanh qua Email)"
-                  className="w-full pl-10 pr-11 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                />
-                <button
-                  type="button"
-                  id="btn-toggle-login-password"
-                  onClick={() => setShowLoginPassword(!showLoginPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer transition-colors"
-                  title={showLoginPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                  aria-label={showLoginPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                >
-                  {showLoginPassword ? (
-                    <EyeOff className="w-4 h-4 text-blue-600" />
-                  ) : (
-                    <Eye className="w-4 h-4 text-slate-500" />
                   )}
-                </button>
-              </div>
+                </div>
+              )}
 
-              {/* Status and quick toggle helper */}
-              <div className="flex items-center justify-between text-[11px] text-slate-500 px-1">
-                <span className="flex items-center space-x-1">
-                  <span>Trạng thái mật khẩu:</span>
-                  <span className={`font-semibold ${showLoginPassword ? 'text-blue-600' : 'text-slate-700'}`}>
-                    {showLoginPassword ? 'Đang hiện ký tự mật khẩu' : 'Đang ẩn mật khẩu (dấu chấm)'}
-                  </span>
-                </span>
+              {/* Primary Google Sign-In Button */}
+              <div className="mb-2.5">
                 <button
                   type="button"
-                  onClick={() => setShowLoginPassword(!showLoginPassword)}
-                  className="text-blue-600 hover:underline cursor-pointer font-bold flex items-center space-x-1"
+                  id="btn-login-google"
+                  onClick={handleGoogleClick}
+                  disabled={googleLoading}
+                  className="w-full py-2 px-3.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-bold text-xs sm:text-sm flex items-center justify-center space-x-2 shadow-xs transition-all active:scale-[0.99] cursor-pointer disabled:opacity-70 group"
                 >
-                  {showLoginPassword ? <span>Ẩn mật khẩu</span> : <span>Hiện mật khẩu</span>}
+                  {googleLoading ? (
+                    <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                  ) : (
+                    <GoogleIcon className="w-4 h-4" />
+                  )}
+                  <span className="flex items-center space-x-1.5">
+                    <span>
+                      {googleLoading
+                        ? 'Đang kết nối Google...'
+                        : `Đăng nhập Google (${
+                            selectedRole === UserRole.PARENT
+                              ? 'Phụ huynh'
+                              : selectedRole === UserRole.TEACHER
+                              ? 'Giáo viên'
+                              : 'Ban giám hiệu'
+                          })`}
+                    </span>
+                    <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-blue-600 transition-colors" />
+                  </span>
                 </button>
               </div>
-            </div>
 
-            <div className="flex items-center justify-between pt-1">
-              <label className="flex items-center space-x-2 text-xs text-slate-600 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={e => setRememberMe(e.target.checked)}
-                  className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
-                />
-                <span>Ghi nhớ đăng nhập trên máy này</span>
-              </label>
-            </div>
-
-            <button
-              type="submit"
-              id="btn-submit-login"
-              className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm shadow-md transition-all active:scale-[0.99] cursor-pointer flex items-center justify-center space-x-2"
-            >
-              <LogIn className="w-4 h-4" />
-              <span>
-                {(() => {
-                  const clean = email.trim().toLowerCase();
-                  const found = clean ? checkUserExists(clean) : null;
-                  if (found) {
-                    return `Đăng nhập ngay (${found.name})`;
-                  }
-                  return 'Kiểm tra tài khoản & Đăng nhập';
-                })()}
-              </span>
-            </button>
-          </form>
-
-          {/* Link to Sign Up */}
-          <div className="mt-5 pt-4 border-t border-slate-100 text-center text-xs text-slate-500">
-            <span>Chưa có tài khoản SchoolPick? </span>
-            <button
-              type="button"
-              id="btn-goto-signup"
-              onClick={() => setAuthMode('signup')}
-              className="font-extrabold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer ml-1"
-            >
-              Đăng ký tài khoản ngay
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div>
-          <div className="mb-5">
-            <h2 className="text-xl font-black text-slate-900">Đăng ký tài khoản mới</h2>
-            <p className="text-xs text-slate-500 mt-1">Đăng ký cho Phụ huynh hoặc Giáo viên để bắt đầu đón/trả con an toàn</p>
-          </div>
-
-          {/* Fast Google Registration */}
-          <div className="mb-5">
-            <button
-              type="button"
-              id="btn-signup-google"
-              onClick={handleGoogleClick}
-              disabled={googleLoading}
-              className="w-full py-3 px-4 rounded-2xl bg-white hover:bg-slate-50 border-2 border-slate-200 hover:border-slate-300 text-slate-700 font-bold text-sm flex items-center justify-center space-x-3 shadow-xs transition-all active:scale-[0.99] cursor-pointer disabled:opacity-70 group"
-            >
-              {googleLoading ? (
-                <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-              ) : (
-                <GoogleIcon className="w-5 h-5" />
-              )}
-              <span>Đăng ký nhanh bằng tài khoản Google</span>
-            </button>
-          </div>
-
-          {/* Divider */}
-          <div className="relative flex py-2 items-center mb-5">
-            <div className="flex-grow border-t border-slate-200"></div>
-            <span className="shrink-0 mx-4 text-slate-400 text-xs font-semibold uppercase tracking-wider">
-              Hoặc điền thông tin đăng ký
-            </span>
-            <div className="flex-grow border-t border-slate-200"></div>
-          </div>
-
-          {/* Role Selection for Sign Up */}
-          <div className="grid grid-cols-2 gap-3 mb-5">
-            <button
-              type="button"
-              id="signup-role-parent"
-              onClick={() => setSignupRole(UserRole.PARENT)}
-              className={`p-3.5 rounded-2xl text-left border-2 transition-all cursor-pointer flex items-center space-x-3 ${
-                signupRole === UserRole.PARENT
-                  ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-500/20'
-                  : 'border-slate-200 hover:border-slate-300 bg-white'
-              }`}
-            >
-              <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
-                <Users className="w-5 h-5" />
+              {/* Divider */}
+              <div className="relative my-2">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-200"></div>
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="px-2 bg-white text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                    Hoặc đăng nhập bằng Email & Mật khẩu
+                  </span>
+                </div>
               </div>
-              <div>
-                <h4 className="text-xs font-black text-slate-900">👨‍👩‍👧 Phụ huynh</h4>
-                <p className="text-[10px] text-slate-500">Đăng ký đón con</p>
-              </div>
-            </button>
 
-            <button
-              type="button"
-              id="signup-role-teacher"
-              onClick={() => setSignupRole(UserRole.TEACHER)}
-              className={`p-3.5 rounded-2xl text-left border-2 transition-all cursor-pointer flex items-center space-x-3 ${
-                signupRole === UserRole.TEACHER
-                  ? 'border-emerald-600 bg-emerald-50/60 ring-2 ring-emerald-500/20'
-                  : 'border-slate-200 hover:border-slate-300 bg-white'
-              }`}
-            >
-              <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                <GraduationCap className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-xs font-black text-slate-900">👩‍🏫 Giáo viên</h4>
-                <p className="text-[10px] text-slate-500">Quản lý lớp học</p>
-              </div>
-            </button>
-          </div>
+              {/* Email and Password Login Form */}
+              <form onSubmit={handleSubmit} className="space-y-2.5">
 
-          {/* Direct Google Sign Up Button */}
-          <div className="mb-4">
-            <button
-              type="button"
-              id="btn-signup-google"
-              onClick={() => {
-                setSelectedRole(signupRole);
-                handleGoogleClick();
-              }}
-              className="w-full py-3.5 px-4 rounded-2xl bg-white hover:bg-slate-50 border-2 border-blue-500/80 ring-2 ring-blue-500/10 text-slate-800 font-black text-xs sm:text-sm flex items-center justify-center space-x-2.5 shadow-xs transition-all active:scale-[0.99] cursor-pointer"
-            >
-              <GoogleIcon className="w-4 h-4" />
-              <span>Đăng ký nhanh bằng tài khoản Google</span>
-            </button>
-            <div className="relative flex py-2 items-center my-1">
-              <div className="flex-grow border-t border-slate-200"></div>
-              <span className="shrink-0 mx-3 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-                hoặc điền thông tin học sinh chi tiết
-              </span>
-              <div className="flex-grow border-t border-slate-200"></div>
-            </div>
-          </div>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="input-login-email" className="block text-[11px] font-bold text-slate-700">
+                      Địa chỉ Email <span className="text-red-500">*</span>
+                    </label>
+                  </div>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      <Mail className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      id="input-login-email"
+                      type="email"
+                      required
+                      value={email}
+                      onChange={e => {
+                        setEmail(e.target.value);
+                        if (errorMessage) setErrorMessage('');
+                        if (accountNotFoundEmail) setAccountNotFoundEmail(null);
+                      }}
+                      placeholder="Nhập email tài khoản của bạn"
+                      className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all font-mono"
+                    />
+                  </div>
 
-          {/* Sign Up Form */}
-          <form onSubmit={handleSignupSubmit} className="space-y-4">
-            {signupErrorMessage && (
-              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium flex items-start space-x-2.5 animate-in fade-in duration-200">
-                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="font-bold text-rose-900 text-xs sm:text-sm">Thông báo kiểm tra thông tin đăng ký</p>
-                  <p className="mt-0.5 text-xs text-rose-700 leading-relaxed">{signupErrorMessage}</p>
-                  {signupErrorMessage.includes('đăng ký') && (
+                  {/* Real-time Email Existence Feedback */}
+                  {(() => {
+                    const clean = email.trim().toLowerCase();
+                    if (!clean) return null;
+                    const found = checkUserExists(clean);
+                    if (found) {
+                      return (
+                        <div className="flex items-center space-x-1.5 text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg animate-in fade-in duration-150">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span className="truncate">
+                            Tài khoản tồn tại: <b>{found.name}</b> ({found.role === UserRole.PARENT ? 'Phụ huynh' : found.role === UserRole.TEACHER ? 'Giáo viên' : 'Quản trị viên'})
+                          </span>
+                        </div>
+                      );
+                    } else if (clean.includes('@') && clean.includes('.')) {
+                      return (
+                        <div className="flex items-center justify-between text-[11px] text-amber-900 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg animate-in fade-in duration-150">
+                          <div className="flex items-center space-x-1.5 truncate mr-2">
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span className="truncate">Chưa có tài khoản này trên hệ thống.</span>
+                          </div>
+                          <button
+                            type="button"
+                            id="btn-inline-quick-signup"
+                            onClick={() => {
+                              setSignupEmail(clean);
+                              setSignupRole(selectedRole);
+                              setAuthMode('signup');
+                            }}
+                            className="font-black text-blue-600 hover:underline cursor-pointer text-[11px] shrink-0"
+                          >
+                            Tạo tài khoản mới &rarr;
+                          </button>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="input-login-password" className="block text-[11px] font-bold text-slate-700">
+                      Mật khẩu <span className="text-slate-400 font-normal text-[10px]">(hoặc để trống nếu đăng nhập qua Email)</span>
+                    </label>
                     <button
                       type="button"
-                      onClick={() => {
-                        setEmail(signupEmail.trim().toLowerCase());
-                        setSelectedRole(signupRole);
-                        setAuthMode('login');
-                      }}
-                      className="mt-2 inline-flex items-center space-x-1 px-3 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold rounded-lg text-xs transition-colors cursor-pointer"
+                      id="btn-forgot-password"
+                      onClick={() => setForgotModalOpen(true)}
+                      className="text-[10px] font-semibold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
                     >
-                      <LogIn className="w-3.5 h-3.5" />
-                      <span>Chuyển sang trang Đăng nhập ngay</span>
+                      Quên mật khẩu?
                     </button>
-                  )}
+                  </div>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      <Lock className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      id="input-login-password"
+                      type={showLoginPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Nhập mật khẩu (hoặc để trống)"
+                      className="w-full pl-9 pr-9 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all font-mono"
+                    />
+                    <button
+                      type="button"
+                      id="btn-toggle-login-password"
+                      onClick={() => setShowLoginPassword(!showLoginPassword)}
+                      className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                      title={showLoginPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                    >
+                      {showLoginPassword ? (
+                        <EyeOff className="w-3.5 h-3.5 text-blue-600" />
+                      ) : (
+                        <Eye className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
 
-            {/* Full Name - Self naming */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Họ và tên của bạn (Tự đặt tên theo ý bạn) <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                  <UserIcon className="w-4 h-4" />
+                <div className="flex items-center justify-between pt-0.5">
+                  <label className="flex items-center space-x-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={e => setRememberMe(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                    />
+                    <span className="text-[11px]">Ghi nhớ đăng nhập</span>
+                  </label>
                 </div>
-                <input
-                  id="input-signup-name"
-                  type="text"
-                  required
-                  value={signupName}
-                  onChange={e => {
-                    setSignupName(e.target.value);
-                    if (signupErrorMessage) setSignupErrorMessage('');
-                  }}
-                  placeholder="Nhập họ và tên đầy đủ của bạn (ví dụ: Nguyễn Bảo Nguyên)"
-                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                />
+
+                <button
+                  type="submit"
+                  id="btn-submit-login"
+                  className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs sm:text-sm shadow-sm transition-all active:scale-[0.99] cursor-pointer flex items-center justify-center space-x-2"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>
+                    {(() => {
+                      const clean = email.trim().toLowerCase();
+                      const found = clean ? checkUserExists(clean) : null;
+                      if (found) {
+                        return `Đăng nhập ngay (${found.name})`;
+                      }
+                      return 'Kiểm tra tài khoản & Đăng nhập';
+                    })()}
+                  </span>
+                </button>
+              </form>
+
+              {/* Link to Sign Up */}
+              <div className="mt-3 pt-2.5 border-t border-slate-100 text-center text-xs text-slate-500">
+                <span>Chưa có tài khoản SchoolPick? </span>
+                <button
+                  type="button"
+                  id="btn-goto-signup"
+                  onClick={() => setAuthMode('signup')}
+                  className="font-extrabold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer ml-1"
+                >
+                  Đăng ký tài khoản ngay
+                </button>
               </div>
             </div>
-
-            {/* Email & Phone Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {/* Real Gmail Input with strict validation */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-slate-700">
-                    Địa chỉ Gmail thật <span className="text-red-500">*</span>
-                  </label>
-                  <span className="text-[10px] text-blue-600 font-semibold bg-blue-50 px-1.5 py-0.5 rounded">
-                    Chỉ nhận @gmail.com
-                  </span>
+          ) : (
+            <div>
+              {/* Sign up Header */}
+              <div className="mb-2">
+                <div className="p-2 bg-emerald-50/90 border border-emerald-200/80 rounded-xl flex items-center space-x-2 text-[11px] text-emerald-800">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="font-semibold">Hệ thống đã sẵn sàng. Hãy điền thông tin bên dưới để tạo tài khoản mới!</span>
                 </div>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <Mail className="w-4 h-4" />
+              </div>
+
+              {/* Fast Google Registration */}
+              <div className="mb-2">
+                <button
+                  type="button"
+                  id="btn-signup-google"
+                  onClick={() => {
+                    setSelectedRole(signupRole);
+                    handleGoogleClick();
+                  }}
+                  disabled={googleLoading}
+                  className="w-full py-2 px-3 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold text-xs flex items-center justify-center space-x-2 shadow-2xs transition-all active:scale-[0.99] cursor-pointer disabled:opacity-70 group"
+                >
+                  {googleLoading ? (
+                    <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                  ) : (
+                    <GoogleIcon className="w-4 h-4" />
+                  )}
+                  <span>Đăng ký nhanh bằng tài khoản Google</span>
+                </button>
+              </div>
+
+              {/* Divider */}
+              <div className="relative flex py-1 items-center mb-2">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="shrink-0 mx-2 text-slate-400 text-[10px] font-semibold uppercase tracking-wider">
+                  Hoặc điền thông tin đăng ký
+                </span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+
+              {/* Role Selection for Sign Up */}
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <button
+                  type="button"
+                  id="signup-role-parent"
+                  onClick={() => setSignupRole(UserRole.PARENT)}
+                  className={`p-2 rounded-xl text-left border transition-all cursor-pointer flex items-center space-x-2 ${
+                    signupRole === UserRole.PARENT
+                      ? 'border-blue-600 bg-blue-50/60 ring-1 ring-blue-500/20'
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                    <Users className="w-4 h-4" />
                   </div>
-                  <input
-                    id="input-signup-email"
-                    type="email"
-                    required
-                    value={signupEmail}
-                    onChange={e => {
-                      setSignupEmail(e.target.value);
-                      if (signupErrorMessage) setSignupErrorMessage('');
-                    }}
-                    placeholder="tenban@gmail.com"
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                  />
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900 leading-none">👨‍👩‍👧 Phụ huynh</h4>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Đăng ký đón con</p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  id="signup-role-teacher"
+                  onClick={() => setSignupRole(UserRole.TEACHER)}
+                  className={`p-2 rounded-xl text-left border transition-all cursor-pointer flex items-center space-x-2 ${
+                    signupRole === UserRole.TEACHER
+                      ? 'border-emerald-600 bg-emerald-50/60 ring-1 ring-emerald-500/20'
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                    <GraduationCap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900 leading-none">👩‍🏫 Giáo viên</h4>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Quản lý lớp học</p>
+                  </div>
+                </button>
+              </div>
+
+              {/* Sign Up Form with 2-Column Compact Grid */}
+              <form onSubmit={handleSignupSubmit} className="space-y-2">
+                {signupErrorMessage && (
+                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium flex items-start space-x-2 animate-in fade-in duration-200">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div className="flex-1 text-[11px]">
+                      <p className="font-bold text-rose-900">{signupErrorMessage}</p>
+                      {signupErrorMessage.includes('đăng ký') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEmail(signupEmail.trim().toLowerCase());
+                            setSelectedRole(signupRole);
+                            setAuthMode('login');
+                          }}
+                          className="mt-1 inline-flex items-center space-x-1 px-2 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold rounded text-[10px] transition-colors cursor-pointer"
+                        >
+                          <LogIn className="w-3 h-3" />
+                          <span>Chuyển sang trang Đăng nhập ngay</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 2-Column Row 1: Full Name & Email */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {/* Full Name */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                      Họ và tên <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                        <UserIcon className="w-3.5 h-3.5" />
+                      </div>
+                      <input
+                        id="input-signup-name"
+                        type="text"
+                        required
+                        value={signupName}
+                        onChange={e => {
+                          setSignupName(e.target.value);
+                          if (signupErrorMessage) setSignupErrorMessage('');
+                        }}
+                        placeholder="VD: Nguyễn Bảo Nguyên"
+                        className="w-full pl-8 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Real Email Input */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                      Địa chỉ Email <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                        <Mail className="w-3.5 h-3.5" />
+                      </div>
+                      <input
+                        id="input-signup-email"
+                        type="email"
+                        required
+                        value={signupEmail}
+                        onChange={e => {
+                          setSignupEmail(e.target.value);
+                          if (signupErrorMessage) setSignupErrorMessage('');
+                        }}
+                        placeholder="VD: user@fpt.edu.vn, gmail..."
+                        className="w-full pl-8 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all font-mono"
+                      />
+                    </div>
+                  </div>
                 </div>
 
-                {/* Real-time Gmail validation status */}
+                {/* Email Real-Time Validation Feedback & Domain pills */}
                 {(() => {
                   const clean = signupEmail.trim().toLowerCase();
-                  if (!clean) {
+                  if (signupEmail.trim() && !signupEmail.includes('@')) {
                     return (
-                      <p className="text-[11px] text-slate-500 mt-1">
-                        * Nhập Gmail thật của bạn (ví dụ: nguyenbaonguyen082014@gmail.com).
-                      </p>
+                      <div className="flex flex-wrap items-center gap-1 animate-in fade-in duration-150">
+                        <span className="text-[10px] text-slate-400 font-medium">Gợi ý:</span>
+                        {['@fpt.edu.vn', '@gmail.com', '@edu.vn', '@yahoo.com', '@outlook.com'].map(suffix => (
+                          <button
+                            key={suffix}
+                            type="button"
+                            onClick={() => {
+                              setSignupEmail(prev => prev.trim() + suffix);
+                              if (signupErrorMessage) setSignupErrorMessage('');
+                            }}
+                            className="px-1.5 py-0.2 rounded text-[10px] font-mono transition-colors cursor-pointer border bg-slate-100 hover:bg-blue-100 text-slate-700 hover:text-blue-700 border-slate-200"
+                          >
+                            {suffix}
+                          </button>
+                        ))}
+                      </div>
                     );
                   }
-
-                  const validation = validateRealGmail(clean);
+                  if (!clean) return null;
+                  const validation = validateRealEmail(clean);
                   const exists = checkUserExists(validation.cleanEmail || clean);
 
                   if (exists) {
                     return (
-                      <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-xl text-xs flex items-center justify-between text-amber-900 animate-in fade-in duration-150">
+                      <div className="p-1.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] flex items-center justify-between text-amber-900 animate-in fade-in duration-150">
                         <div className="flex items-center space-x-1.5 truncate mr-2">
-                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                          <span className="truncate">Gmail đã có tài khoản ({exists.name})</span>
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span className="truncate">Email đã có tài khoản ({exists.name})</span>
                         </div>
                         <button
                           type="button"
@@ -1152,337 +1244,245 @@ interface SavedGoogleAccount {
 
                   if (validation.isValid) {
                     return (
-                      <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs flex items-center space-x-1.5 text-emerald-800 font-semibold animate-in fade-in duration-150">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span className="truncate">✓ Gmail thật hợp lệ: <b>{validation.cleanEmail}</b></span>
+                      <div className="p-1 px-2 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] flex items-center space-x-1 text-emerald-800 font-semibold animate-in fade-in duration-150">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span className="truncate">✓ Email hợp lệ: <b>{validation.cleanEmail}</b></span>
                       </div>
                     );
                   } else {
                     return (
-                      <div className="mt-1.5 p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs flex items-start space-x-1.5 text-rose-800 animate-in fade-in duration-150">
-                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                        <span className="text-[11px] leading-tight font-medium text-rose-700">{validation.reason}</span>
+                      <div className="p-1 px-2 bg-rose-50 border border-rose-200 rounded-lg text-[11px] flex items-center space-x-1 text-rose-800 animate-in fade-in duration-150">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                        <span className="font-semibold text-rose-700">{validation.reason || 'Email không tồn tại.'}</span>
                       </div>
                     );
                   }
                 })()}
-              </div>
 
-              {/* Real Phone Number Input with strict validation */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-slate-700">
-                    Số điện thoại di động <span className="text-red-500">*</span>
-                  </label>
-                  <span className="text-[10px] text-slate-500 font-medium">
-                    10 số (03, 05, 07, 08, 09)
-                  </span>
-                </div>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <Phone className="w-4 h-4" />
+                {/* 2-Column Row 2: Phone & Password */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {/* Phone Input */}
+                  <div>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <label className="block text-[11px] font-bold text-slate-700">
+                        Số điện thoại <span className="text-red-500">*</span>
+                      </label>
+                      <span className="text-[9px] text-slate-400 font-medium">10 số di động</span>
+                    </div>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                        <Phone className="w-3.5 h-3.5" />
+                      </div>
+                      <input
+                        id="input-signup-phone"
+                        type="tel"
+                        required
+                        value={signupPhone}
+                        onChange={e => {
+                          setSignupPhone(e.target.value);
+                          if (signupErrorMessage) setSignupErrorMessage('');
+                        }}
+                        placeholder="VD: 0912 345 678"
+                        className="w-full pl-8 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all font-mono"
+                      />
+                    </div>
                   </div>
-                  <input
-                    id="input-signup-phone"
-                    type="tel"
-                    required
-                    value={signupPhone}
-                    onChange={e => {
-                      setSignupPhone(e.target.value);
-                      if (signupErrorMessage) setSignupErrorMessage('');
-                    }}
-                    placeholder="VD: 0912 345 678"
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                  />
-                </div>
 
-                {/* Real-time Phone validation status */}
-                {(() => {
-                  const raw = signupPhone.trim();
-                  if (!raw) {
-                    return (
-                      <p className="text-[11px] text-slate-500 mt-1">
-                        * Bắt buộc số điện thoại thật để nhà trường liên hệ đón học sinh.
-                      </p>
-                    );
-                  }
-
-                  const validation = validateRealPhoneNumber(raw);
-                  if (validation.isValid) {
-                    return (
-                      <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs flex items-center space-x-1.5 text-emerald-800 font-semibold animate-in fade-in duration-150">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span className="truncate">
-                          ✓ Số điện thoại thật ({validation.carrier}): <b>{validation.formattedPhone}</b>
+                  {/* Password Input */}
+                  <div>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <label className="block text-[11px] font-bold text-slate-700">
+                        Mật khẩu <span className="text-red-500">*</span>
+                      </label>
+                      {useGooglePasswordOption ? (
+                        <span className="text-[9px] text-blue-700 font-semibold bg-blue-50 border border-blue-200/60 px-1 py-0.2 rounded flex items-center space-x-0.5">
+                          <GoogleIcon className="w-2.5 h-2.5" />
+                          <span>Google</span>
                         </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setGooglePasswordModalOpen(true)}
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold flex items-center space-x-1 hover:underline cursor-pointer"
+                        >
+                          <GoogleIcon className="w-2.5 h-2.5" />
+                          <span>Gợi ý Google</span>
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                        <Lock className="w-3.5 h-3.5" />
                       </div>
-                    );
-                  } else {
-                    return (
-                      <div className="mt-1.5 p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs flex items-start space-x-1.5 text-rose-800 animate-in fade-in duration-150">
-                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                        <span className="text-[11px] leading-tight font-medium text-rose-700">{validation.reason}</span>
+                      <input
+                        id="input-signup-password"
+                        type={showSignupPassword ? 'text' : 'password'}
+                        required
+                        value={signupPassword}
+                        onFocus={() => {
+                          if (!hasShownGooglePasswordPrompt && !signupPassword && !useGooglePasswordOption) {
+                            setHasShownGooglePasswordPrompt(true);
+                            setGooglePasswordModalOpen(true);
+                          }
+                        }}
+                        onClick={() => {
+                          if (!hasShownGooglePasswordPrompt && !signupPassword && !useGooglePasswordOption) {
+                            setHasShownGooglePasswordPrompt(true);
+                            setGooglePasswordModalOpen(true);
+                          }
+                        }}
+                        onChange={e => {
+                          setSignupPassword(e.target.value);
+                          if (useGooglePasswordOption) {
+                            setUseGooglePasswordOption(false);
+                          }
+                        }}
+                        placeholder="Nhập mật khẩu..."
+                        className="w-full pl-8 pr-8 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all font-mono"
+                      />
+                      <div className="absolute inset-y-0 right-0 pr-1.5 flex items-center">
+                        <button
+                          type="button"
+                          id="btn-toggle-signup-password"
+                          onClick={() => setShowSignupPassword(!showSignupPassword)}
+                          className="p-1 text-slate-400 hover:text-slate-600 rounded cursor-pointer"
+                          title={showSignupPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                        >
+                          {showSignupPassword ? (
+                            <EyeOff className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <Eye className="w-3.5 h-3.5 text-slate-500" />
+                          )}
+                        </button>
                       </div>
-                    );
-                  }
-                })()}
-              </div>
-            </div>
-
-            {/* Role Specific Fields */}
-            {signupRole === UserRole.PARENT ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-blue-50/60 rounded-2xl border border-blue-100">
-                <div>
-                  <label className="block text-xs font-bold text-blue-900 mb-1">
-                    Họ tên con (Học sinh) <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    id="input-signup-student-name"
-                    type="text"
-                    required
-                    value={signupStudentName}
-                    onChange={e => setSignupStudentName(e.target.value)}
-                    placeholder="VD: Nguyễn Tuấn Kiệt"
-                    className="w-full px-3 py-2 bg-white border border-blue-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-blue-900 mb-1">
-                    Lớp của học sinh
-                  </label>
-                  <select
-                    id="select-signup-class"
-                    value={signupClassName}
-                    onChange={e => setSignupClassName(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-blue-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                  >
-                    <option value="6A1">Lớp 6A1 (Khu A)</option>
-                    <option value="6A2">Lớp 6A2 (Khu A)</option>
-                    <option value="7A1">Lớp 7A1 (Khu B)</option>
-                    <option value="7A2">Lớp 7A2 (Khu B)</option>
-                    <option value="8A1">Lớp 8A1 (Khu C)</option>
-                    <option value="9A1">Lớp 9A1 (Khu D)</option>
-                  </select>
-                </div>
-              </div>
-            ) : (
-              <div className="p-3 bg-emerald-50/60 rounded-2xl border border-emerald-100">
-                <label className="block text-xs font-bold text-emerald-900 mb-1">
-                  Lớp chủ nhiệm / phụ trách
-                </label>
-                <select
-                  id="select-signup-teacher-class"
-                  value={signupClassName}
-                  onChange={e => setSignupClassName(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-                >
-                  <option value="7A1">Lớp 7A1 - Khối 7</option>
-                  <option value="7A2">Lớp 7A2 - Khối 7</option>
-                  <option value="6A1">Lớp 6A1 - Khối 6</option>
-                  <option value="6A2">Lớp 6A2 - Khối 6</option>
-                  <option value="8A1">Lớp 8A1 - Khối 8</option>
-                  <option value="9A1">Lớp 9A1 - Khối 9</option>
-                </select>
-              </div>
-            )}
-
-            {/* Password Choice: Google-generated vs Custom password */}
-            <div className="space-y-2.5 pt-1">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-bold text-slate-700">
-                  Mật khẩu tài khoản <span className="text-red-500">*</span>
-                </label>
-                <div className="flex items-center space-x-1 p-0.5 bg-slate-100 rounded-lg border border-slate-200/80 text-[11px] font-bold">
-                  <button
-                    type="button"
-                    id="btn-choose-google-pwd"
-                    onClick={() => {
-                      setUseGooglePasswordOption(true);
-                      setSignupPassword(googleGeneratedPassword);
-                    }}
-                    className={`px-2 py-0.5 rounded-md transition-all cursor-pointer flex items-center space-x-1 ${
-                      useGooglePasswordOption
-                        ? 'bg-white text-blue-700 shadow-2xs font-black'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    <GoogleIcon className="w-3 h-3" />
-                    <span>Google tạo</span>
-                  </button>
-                  <button
-                    type="button"
-                    id="btn-choose-custom-pwd"
-                    onClick={() => {
-                      setUseGooglePasswordOption(false);
-                      setSignupPassword('');
-                    }}
-                    className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
-                      !useGooglePasswordOption
-                        ? 'bg-white text-blue-700 shadow-2xs font-black'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    <span>Tự đặt</span>
-                  </button>
-                </div>
-              </div>
-
-              {useGooglePasswordOption ? (
-                /* Google Generated Password Box */
-                <div className="p-3.5 bg-gradient-to-r from-blue-50/90 via-indigo-50/60 to-white rounded-2xl border border-blue-200/90 space-y-2.5 shadow-2xs">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-1.5 text-xs font-black text-blue-900">
-                      <ShieldCheck className="w-4 h-4 text-blue-600" />
-                      <span>Mật khẩu bảo mật do Google đề xuất</span>
                     </div>
-                    <span className="text-[10px] font-extrabold uppercase tracking-wide bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                      Bảo mật cao
-                    </span>
-                  </div>
-
-                  <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-xl border border-blue-200 shadow-2xs">
-                    <div className="flex-1 font-mono text-xs sm:text-sm font-bold text-slate-900 tracking-wider overflow-x-auto select-all">
-                      {showSignupPassword ? googleGeneratedPassword : '••••••••••••••••'}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowSignupPassword(!showSignupPassword)}
-                      className="p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
-                      title={showSignupPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                    >
-                      {showSignupPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newPwd = generateGoogleSecurePassword();
-                        setGoogleGeneratedPassword(newPwd);
-                        setSignupPassword(newPwd);
-                        addToast('Đã tạo mật khẩu bảo mật mới từ Google', 'info');
-                      }}
-                      className="p-1 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer"
-                      title="Tạo lại mật khẩu ngẫu nhiên khác"
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(googleGeneratedPassword);
-                        setCopiedGooglePassword(true);
-                        addToast('Đã sao chép mật khẩu Google tạo vào bộ nhớ tạm!', 'success');
-                        setTimeout(() => setCopiedGooglePassword(false), 2000);
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center space-x-1 transition-all cursor-pointer ${
-                        copiedGooglePassword
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs'
-                      }`}
-                    >
-                      {copiedGooglePassword ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedGooglePassword ? 'Đã chép' : 'Sao chép'}</span>
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between text-[11px] text-slate-500">
-                    <span className="flex items-center space-x-1 text-emerald-600 font-semibold">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Độ mạnh: Chuẩn Google Smart Lock (16 ký tự phức hợp)</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUseGooglePasswordOption(false);
-                        setSignupPassword('');
-                      }}
-                      className="text-blue-600 hover:underline cursor-pointer"
-                    >
-                      Tôi muốn tự đặt mật khẩu riêng
-                    </button>
                   </div>
                 </div>
-              ) : (
-                /* Custom Password Input */
-                <div className="space-y-1.5">
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <Lock className="w-4 h-4" />
+
+                {/* Google password active banner (compact) */}
+                {useGooglePasswordOption && (
+                  <div className="p-1 px-2 bg-blue-50 border border-blue-200 rounded-lg text-[11px] flex items-center justify-between text-blue-900 animate-in fade-in duration-150">
+                    <div className="flex items-center space-x-1 truncate mr-2">
+                      <ShieldCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span className="truncate font-semibold text-[10px]">Đang dùng mật khẩu bảo mật Google</span>
                     </div>
-                    <input
-                      id="input-signup-password"
-                      type={showSignupPassword ? 'text' : 'password'}
-                      required
-                      value={signupPassword}
-                      onChange={e => setSignupPassword(e.target.value)}
-                      placeholder="Nhập mật khẩu riêng của bạn (tối thiểu 6 ký tự)"
-                      className="w-full pl-10 pr-12 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                    />
-                    <div className="absolute inset-y-0 right-0 pr-2.5 flex items-center">
+                    <div className="flex items-center space-x-2 shrink-0">
                       <button
                         type="button"
-                        id="btn-toggle-signup-password"
-                        onClick={() => setShowSignupPassword(!showSignupPassword)}
-                        className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer transition-colors"
-                        title={showSignupPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                        aria-label={showSignupPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                        onClick={() => {
+                          navigator.clipboard?.writeText(signupPassword);
+                          setCopiedGooglePassword(true);
+                          addToast('Đã sao chép mật khẩu vào bộ nhớ tạm!', 'success');
+                          setTimeout(() => setCopiedGooglePassword(false), 2000);
+                        }}
+                        className="text-[10px] text-blue-700 hover:text-blue-900 font-bold underline cursor-pointer"
                       >
-                        {showSignupPassword ? (
-                          <EyeOff className="w-4 h-4 text-blue-600" />
-                        ) : (
-                          <Eye className="w-4 h-4 text-slate-500" />
-                        )}
+                        {copiedGooglePassword ? '✓ Đã chép' : 'Sao chép'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGooglePasswordModalOpen(true)}
+                        className="text-[10px] text-blue-600 hover:underline font-semibold cursor-pointer"
+                      >
+                        Đổi
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUseGooglePasswordOption(false);
+                          setSignupPassword('');
+                        }}
+                        className="text-[10px] text-slate-500 hover:text-slate-700 cursor-pointer"
+                      >
+                        Tự đặt
                       </button>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 px-1">
-                    <span className="flex items-center space-x-1">
-                      <span>Trạng thái:</span>
-                      <span className={`font-semibold ${showSignupPassword ? 'text-blue-600' : 'text-slate-700'}`}>
-                        {showSignupPassword ? 'Đang hiện ký tự' : 'Đang ẩn mật khẩu (dấu chấm)'}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUseGooglePasswordOption(true);
-                        setSignupPassword(googleGeneratedPassword);
-                      }}
-                      className="text-blue-600 font-bold hover:underline cursor-pointer flex items-center space-x-1"
-                    >
-                      <GoogleIcon className="w-3 h-3" />
-                      <span>Đổi sang mật khẩu Google tạo</span>
-                    </button>
+                )}
+
+                {/* Role Specific Fields */}
+                {signupRole === UserRole.PARENT ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2 bg-blue-50/60 rounded-xl border border-blue-100">
+                    <div>
+                      <label className="block text-[11px] font-bold text-blue-900 mb-0.5">
+                        Họ tên con (Học sinh) <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        id="input-signup-student-name"
+                        type="text"
+                        required
+                        value={signupStudentName}
+                        onChange={e => setSignupStudentName(e.target.value)}
+                        placeholder="VD: Nguyễn Tuấn Kiệt"
+                        className="w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-blue-900 mb-0.5">
+                        Lớp của học sinh
+                      </label>
+                      <select
+                        id="select-signup-class"
+                        value={signupClassName}
+                        onChange={e => setSignupClassName(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                      >
+                        <option value="6A1">Lớp 6A1 (Khu A)</option>
+                        <option value="6A2">Lớp 6A2 (Khu A)</option>
+                        <option value="7A1">Lớp 7A1 (Khu B)</option>
+                        <option value="7A2">Lớp 7A2 (Khu B)</option>
+                        <option value="8A1">Lớp 8A1 (Khu C)</option>
+                        <option value="9A1">Lớp 9A1 (Khu D)</option>
+                      </select>
+                    </div>
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="p-2 bg-emerald-50/60 rounded-xl border border-emerald-100">
+                    <label className="block text-[11px] font-bold text-emerald-900 mb-0.5">
+                      Lớp chủ nhiệm / phụ trách
+                    </label>
+                    <select
+                      id="select-signup-teacher-class"
+                      value={signupClassName}
+                      onChange={e => setSignupClassName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-emerald-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                    >
+                      <option value="7A1">Lớp 7A1 - Khối 7</option>
+                      <option value="7A2">Lớp 7A2 - Khối 7</option>
+                      <option value="6A1">Lớp 6A1 - Khối 6</option>
+                      <option value="6A2">Lớp 6A2 - Khối 6</option>
+                      <option value="8A1">Lớp 8A1 - Khối 8</option>
+                      <option value="9A1">Lớp 9A1 - Khối 9</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Submit button */}
+                <button
+                  id="btn-submit-signup"
+                  type="submit"
+                  className="w-full py-2.5 px-4 rounded-xl text-white font-black text-xs sm:text-sm flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 shadow-sm shadow-blue-500/20 transition-all active:scale-[0.99] cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Tạo tài khoản & Đăng nhập ngay</span>
+                </button>
+              </form>
+
+              {/* Link to Login */}
+              <div className="mt-2.5 pt-2 border-t border-slate-100 text-center text-xs text-slate-500">
+                <span>Đã có tài khoản SchoolPick? </span>
+                <button
+                  type="button"
+                  id="btn-goto-login"
+                  onClick={() => setAuthMode('login')}
+                  className="font-extrabold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer ml-1"
+                >
+                  Đăng nhập tại đây
+                </button>
+              </div>
             </div>
-
-            {/* Submit button */}
-            <button
-              id="btn-submit-signup"
-              type="submit"
-              className="w-full py-3.5 px-4 rounded-xl text-white font-black text-sm sm:text-base flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 shadow-md shadow-blue-500/25 transition-all active:scale-[0.99] cursor-pointer"
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>Tạo tài khoản & Đăng nhập ngay</span>
-            </button>
-          </form>
-
-          {/* Link to Login */}
-          <div className="mt-5 pt-4 border-t border-slate-100 text-center text-xs text-slate-500">
-            <span>Đã có tài khoản SchoolPick? </span>
-            <button
-              type="button"
-              id="btn-goto-login"
-              onClick={() => setAuthMode('login')}
-              className="font-extrabold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer ml-1"
-            >
-              Đăng nhập tại đây
-            </button>
-          </div>
+          )}
         </div>
-      )}
-    </div>
       </div>
 
       {/* GOOGLE SIGN IN MODAL / AUTHENTIC GOOGLE ACCOUNT CHOOSER */}
@@ -1593,83 +1593,111 @@ interface SavedGoogleAccount {
               {!isUsingAnotherAccount ? (
                 <div className="space-y-1 divide-y divide-slate-100">
                   {/* Primary Machine Account: Nguyen Bao Nguyen */}
-                  <div
-                    onClick={() =>
-                      handleConfirmGoogleLogin(
-                        'nguyenbaonguyen082014@gmail.com',
-                        'Nguyễn Bảo Nguyên',
-                        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
-                        anyGoogleRole
-                      )
-                    }
-                    className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-all cursor-pointer group border border-transparent hover:border-slate-200"
-                  >
-                    <div className="flex items-center space-x-3.5 min-w-0">
-                      <div className="relative">
-                        <img
-                          src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80"
-                          alt="Nguyễn Bảo Nguyên"
-                          className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
-                        />
-                        <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center space-x-2">
-                          <p className="text-sm font-semibold text-slate-900 truncate group-hover:text-blue-600">
-                            Nguyễn Bảo Nguyên
-                          </p>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
-                            Có sẵn trên máy
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 truncate">
-                          nguyenbaonguyen082014@gmail.com
-                        </p>
-                      </div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-blue-600 group-hover:translate-x-0.5 transition-all shrink-0 ml-2" />
-                  </div>
-
-                  {/* Other saved device accounts */}
-                  {savedGoogleAccounts
-                    .filter(a => a.email.toLowerCase() !== 'nguyenbaonguyen082014@gmail.com')
-                    .map(account => (
+                  {(() => {
+                    const primaryEmail = 'nguyenbaonguyen082014@gmail.com';
+                    const isRegistered = Boolean(checkUserExists(primaryEmail));
+                    return (
                       <div
-                        key={account.email}
                         onClick={() =>
                           handleConfirmGoogleLogin(
-                            account.email,
-                            account.name,
-                            account.avatarUrl,
+                            primaryEmail,
+                            'Nguyễn Bảo Nguyên',
+                            'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
                             anyGoogleRole
                           )
                         }
                         className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-all cursor-pointer group border border-transparent hover:border-slate-200"
                       >
                         <div className="flex items-center space-x-3.5 min-w-0">
-                          {account.avatarUrl ? (
+                          <div className="relative">
                             <img
-                              src={account.avatarUrl}
-                              alt={account.name}
+                              src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80"
+                              alt="Nguyễn Bảo Nguyên"
                               className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
                             />
-                          ) : (
-                            <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
-                              {account.name.charAt(0)}
-                            </div>
-                          )}
+                            <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full" />
+                          </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-900 truncate group-hover:text-blue-600">
-                              {account.name}
-                            </p>
+                            <div className="flex items-center space-x-2">
+                              <p className="text-sm font-semibold text-slate-900 truncate group-hover:text-blue-600">
+                                Nguyễn Bảo Nguyên
+                              </p>
+                              {isRegistered ? (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 flex items-center space-x-0.5">
+                                  <Check className="w-2.5 h-2.5" />
+                                  <span>Đã có tài khoản</span>
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0">
+                                  Chưa đăng ký
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-slate-500 truncate">
-                              {account.email}
+                              {primaryEmail}
                             </p>
                           </div>
                         </div>
                         <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-blue-600 group-hover:translate-x-0.5 transition-all shrink-0 ml-2" />
                       </div>
-                    ))}
+                    );
+                  })()}
+
+                  {/* Other saved device accounts */}
+                  {savedGoogleAccounts
+                    .filter(a => a.email.toLowerCase() !== 'nguyenbaonguyen082014@gmail.com')
+                    .map(account => {
+                      const isRegistered = Boolean(checkUserExists(account.email));
+                      return (
+                        <div
+                          key={account.email}
+                          onClick={() =>
+                            handleConfirmGoogleLogin(
+                              account.email,
+                              account.name,
+                              account.avatarUrl,
+                              anyGoogleRole
+                            )
+                          }
+                          className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-all cursor-pointer group border border-transparent hover:border-slate-200"
+                        >
+                          <div className="flex items-center space-x-3.5 min-w-0">
+                            {account.avatarUrl ? (
+                              <img
+                                src={account.avatarUrl}
+                                alt={account.name}
+                                className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
+                                {account.name.charAt(0)}
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex items-center space-x-2">
+                                <p className="text-sm font-semibold text-slate-900 truncate group-hover:text-blue-600">
+                                  {account.name}
+                                </p>
+                                {isRegistered ? (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 flex items-center space-x-0.5">
+                                    <Check className="w-2.5 h-2.5" />
+                                    <span>Đã có tài khoản</span>
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0">
+                                    Chưa đăng ký
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-500 truncate">
+                                {account.email}
+                              </p>
+                            </div>
+                          </div>
+                          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-blue-600 group-hover:translate-x-0.5 transition-all shrink-0 ml-2" />
+                        </div>
+                      );
+                    })}
 
                   {/* Use another account option */}
                   <div
@@ -1854,6 +1882,142 @@ interface SavedGoogleAccount {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Google Strong Password Modal Window */}
+      {googlePasswordModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
+          onClick={closeGooglePasswordModal}
+        >
+          <div
+            id="google-password-modal-window"
+            className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95 duration-150"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center shadow-2xs shrink-0">
+                  <GoogleIcon className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base leading-tight">
+                    Đề xuất mật khẩu mạnh từ Google
+                  </h3>
+                  <p className="text-[11px] text-slate-500 flex items-center space-x-1 mt-0.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Trình quản lý mật khẩu Google</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeGooglePasswordModal}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
+                title="Đóng cửa sổ"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Description */}
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Google tự động đề xuất một mật khẩu bảo mật cao (16 ký tự gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt) để bảo vệ an toàn cho tài khoản của bạn.
+            </p>
+
+            {/* Password Preview Box */}
+            <div className="p-3.5 bg-gradient-to-r from-blue-50/90 via-indigo-50/50 to-slate-50 rounded-xl border border-blue-200/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wider">
+                  Mật khẩu được tạo
+                </span>
+                <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                  Bảo mật cao
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between bg-white px-3 py-2.5 rounded-lg border border-blue-200/90 shadow-2xs">
+                <span className="font-mono text-xs sm:text-sm font-bold text-slate-900 tracking-wider select-all overflow-x-auto">
+                  {showSignupPassword ? googleGeneratedPassword : '••••••••••••••••'}
+                </span>
+                <div className="flex items-center space-x-1 ml-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowSignupPassword(!showSignupPassword)}
+                    className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
+                    title={showSignupPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                  >
+                    {showSignupPassword ? (
+                      <EyeOff className="w-4 h-4 text-blue-600" />
+                    ) : (
+                      <Eye className="w-4 h-4 text-slate-500" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newPwd = generateGoogleSecurePassword();
+                      setGoogleGeneratedPassword(newPwd);
+                      addToast('Đã tạo mật khẩu ngẫu nhiên mới!', 'info');
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 cursor-pointer transition-colors"
+                    title="Tạo lại mật khẩu khác"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(googleGeneratedPassword);
+                      setCopiedGooglePassword(true);
+                      addToast('Đã sao chép mật khẩu vào bộ nhớ tạm!', 'success');
+                      setTimeout(() => setCopiedGooglePassword(false), 2000);
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-emerald-600 rounded-lg hover:bg-emerald-50 cursor-pointer transition-colors"
+                    title="Sao chép mật khẩu"
+                  >
+                    {copiedGooglePassword ? (
+                      <Check className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="w-4 h-4 text-slate-500" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-1 text-[10px] text-slate-500 pt-0.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Đạt chuẩn Google Smart Lock (16 ký tự phức hợp)</span>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                onClick={closeGooglePasswordModal}
+                className="px-3.5 py-2 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition-all cursor-pointer"
+              >
+                Tôi tự đặt mật khẩu
+              </button>
+              <button
+                type="button"
+                id="btn-confirm-use-google-password"
+                onClick={() => {
+                  setSignupPassword(googleGeneratedPassword);
+                  setUseGooglePasswordOption(true);
+                  closeGooglePasswordModal();
+                  addToast('Đã áp dụng mật khẩu mạnh từ Google!', 'success');
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 shadow-sm"
+              >
+                <GoogleIcon className="w-3.5 h-3.5" />
+                <span>Sử dụng mật khẩu này</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
